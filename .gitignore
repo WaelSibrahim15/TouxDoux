@@ -26,3 +26,4 @@ dist-ssr
 # Backend
 server/touxdoux.db
 server/uploads/
+.env
