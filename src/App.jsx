@@ -79,7 +79,7 @@ function saveTasks(tasks) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
 }
 
-function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete }) {
+function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete, onUploadFile }) {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -87,6 +87,8 @@ function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete }) {
   const [project, setProject] = useState(""); // "" none, "Work", "Personal"
   const [status, setStatus] = useState("incomplete");
   const [error, setError] = useState("");
+  const [attachment, setAttachment] = useState(null); // { path: '', name: '' }
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -97,7 +99,9 @@ function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete }) {
     setPriority(Number.isFinite(t?.priority) ? t.priority : 1);
     setProject(t?.project ?? "");
     setStatus(t?.status ?? "incomplete");
+    setAttachment(t?.attachmentPath ? { path: t.attachmentPath, name: t.attachmentName } : null);
     setError("");
+    setIsUploading(false);
   }, [open, initialTask]);
 
   const titleRef = useRef(null);
@@ -106,6 +110,27 @@ function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete }) {
   }, [open]);
 
   if (!open) return null;
+
+  async function handleFileChange(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!onUploadFile) {
+      setError("File upload not supported in this version.");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const result = await onUploadFile(file);
+      setAttachment({ path: result.path, name: result.originalName });
+    } catch (err) {
+      console.error(err);
+      setError("Failed to upload file.");
+    } finally {
+      setIsUploading(false);
+    }
+  }
 
   function handleSave() {
     if (!title.trim()) {
@@ -119,6 +144,8 @@ function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete }) {
       priority: Math.max(1, Number(priority) || 1),
       project: project || "",
       status,
+      attachmentPath: attachment?.path || null,
+      attachmentName: attachment?.name || null,
     };
     onSave(cleaned);
   }
@@ -201,6 +228,30 @@ function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete }) {
               </select>
             </div>
           </div>
+
+          <div className="field" style={{ marginTop: '10px' }}>
+            <label>Attachment (optional)</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input
+                type="file"
+                onChange={handleFileChange}
+                disabled={isUploading}
+                style={{ fontSize: '12px' }}
+              />
+              {isUploading && <span style={{ fontSize: '12px', color: '#666' }}>Uploading...</span>}
+            </div>
+            {attachment && !isUploading && (
+              <div style={{ marginTop: '5px', fontSize: '12px', color: '#2c5282' }}>
+                Attached: <strong>{attachment.name}</strong>
+                <button
+                  onClick={() => setAttachment(null)}
+                  style={{ marginLeft: '10px', background: 'none', border: 'none', color: '#e53e3e', cursor: 'pointer', padding: 0 }}
+                >
+                  (Remove)
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="modalFooter">
@@ -210,7 +261,9 @@ function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete }) {
             </button>
           ) : null}
           <button className="secondaryBtn" onClick={onCancel}>Cancel</button>
-          <button className="primaryBtn" onClick={handleSave}>Save</button>
+          <button className="primaryBtn" onClick={handleSave} disabled={isUploading}>
+            {isUploading ? 'Uploading...' : 'Save'}
+          </button>
         </div>
       </div>
     </div>
@@ -277,6 +330,7 @@ function BulkTaskModal({ open, onCancel, onExport }) {
 function PrintTasksModal({ open, onCancel, tasks, formatDate }) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [projectFilter, setProjectFilter] = useState("all");
   const [showPreview, setShowPreview] = useState(false);
   const [excludedIds, setExcludedIds] = useState(new Set());
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -294,6 +348,7 @@ function PrintTasksModal({ open, onCancel, tasks, formatDate }) {
       setStartDate(toISODate(thirtyDaysAgo));
       setEndDate(toISODate(today));
       setShowPreview(false);
+      setProjectFilter("all");
       setExcludedIds(new Set());
       setPosition({ x: 0, y: 0 });
     }
@@ -337,6 +392,7 @@ function PrintTasksModal({ open, onCancel, tasks, formatDate }) {
   const filteredTasks = tasks.filter(t => {
     if (!t.dueDate) return false;
     if (excludedIds.has(t.id)) return false;
+    if (projectFilter !== "all" && t.project !== projectFilter) return false;
     return t.dueDate >= startDate && t.dueDate <= endDate;
   });
 
@@ -463,6 +519,18 @@ function PrintTasksModal({ open, onCancel, tasks, formatDate }) {
                 onChange={(e) => setEndDate(e.target.value)}
               />
             </div>
+            <div className="dateField">
+              <label>Project:</label>
+              <select
+                value={projectFilter}
+                onChange={(e) => setProjectFilter(e.target.value)}
+                style={{ height: '32px', padding: '0 8px', borderRadius: '4px', border: '1px solid #445' }}
+              >
+                <option value="all">All Projects</option>
+                <option value="Work">Work Only</option>
+                <option value="Personal">Personal Only</option>
+              </select>
+            </div>
             <button className="blackBtn" onClick={handleGeneratePreview}>
               Generate Preview
             </button>
@@ -539,8 +607,12 @@ function PrintTasksModal({ open, onCancel, tasks, formatDate }) {
   );
 }
 
-export default function App() {
+export default function App({ onLogout, userEmail, onUploadFile }) {
   const [tasks, setTasks] = useState(() => loadTasks());
+
+  useEffect(() => {
+    saveTasks(tasks);
+  }, [tasks]);
   const [filter, setFilter] = useState("all"); // all|active|completed
   const [sort, setSort] = useState("default"); // default|due|priority|created
   const [search, setSearch] = useState(""); // optional v1
@@ -575,9 +647,7 @@ export default function App() {
     });
   }, [weekStart, todayISO]);
 
-  useEffect(() => {
-    saveTasks(tasks);
-  }, [tasks]);
+  // Remove localStorage sync - now handled by database
 
   const editingTask = useMemo(() => tasks.find(t => t.id === editingId) || null, [tasks, editingId]);
 
@@ -607,8 +677,10 @@ export default function App() {
         priority: fields.priority,
         status: fields.status,
         createdAt: new Date().toISOString(),
-        dueDate: fields.dueDate || todayISO, // Default to today if no date provided
+        dueDate: fields.dueDate || todayISO,
         project: fields.project,
+        attachmentPath: fields.attachmentPath,
+        attachmentName: fields.attachmentName,
       };
       setTasks(prev => [newTask, ...prev]);
       setModalOpen(false);
@@ -627,6 +699,8 @@ export default function App() {
             status: fields.status,
             dueDate: fields.dueDate,
             project: fields.project,
+            attachmentPath: fields.attachmentPath,
+            attachmentName: fields.attachmentName,
           }
           : t
       )
@@ -662,10 +736,8 @@ export default function App() {
       prev.map(t => {
         if (t.id !== taskId) return t;
         if (t.status === "complete") {
-          // Restore previous priority when undoing
           return { ...t, status: "incomplete", priority: t.previousPriority || t.priority || 1 };
         } else {
-          // Save current priority before marking complete
           return { ...t, status: "complete", previousPriority: t.priority };
         }
       })
@@ -930,6 +1002,18 @@ export default function App() {
         <div className="branding">
           <h1 className="appTitle">TOUXDOUX</h1>
           <p className="copyright">Private and Confidential Wael Ibrahim © 2026 version 1.23</p>
+          {userEmail && (
+            <div style={{ marginTop: '5px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' }}>
+              <span>{userEmail}</span>
+              <button
+                onClick={onLogout}
+                className="secondaryBtn"
+                style={{ padding: '2px 8px', fontSize: '11px' }}
+              >
+                Logout
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1062,6 +1146,15 @@ export default function App() {
                             {t.project ? <span className="chip">{t.project}</span> : null}
                             {overdue ? <span className="chip overdue">Overdue</span> : null}
                           </div>
+
+                          {/* Attachment Link */}
+                          {t.attachmentPath && (
+                            <div className="attachment" onClick={(e) => e.stopPropagation()}>
+                              <a href={`http://localhost:3000${t.attachmentPath}`} target="_blank" rel="noopener noreferrer" className="attachmentLink">
+                                📎 {t.attachmentName || 'Attachment'}
+                              </a>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1133,6 +1226,7 @@ export default function App() {
         onCancel={closeModal}
         onSave={handleSaveFromModal}
         onDelete={handleDelete}
+        onUploadFile={onUploadFile}
       />
 
       <BulkTaskModal
