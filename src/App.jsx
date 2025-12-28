@@ -607,12 +607,55 @@ function PrintTasksModal({ open, onCancel, tasks, formatDate }) {
   );
 }
 
-export default function App({ onLogout, userEmail, onUploadFile }) {
+export default function App() {
   const [tasks, setTasks] = useState(() => loadTasks());
 
   useEffect(() => {
     saveTasks(tasks);
   }, [tasks]);
+
+  const [lastDeleted, setLastDeleted] = useState(null);
+
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "z") {
+        e.preventDefault();
+        undoDelete();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [lastDeleted, tasks]);
+
+  function permanentlyDelete(taskId) {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    setLastDeleted(task);
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+  }
+
+  function undoDelete() {
+    if (!lastDeleted) return;
+    setTasks(prev => [lastDeleted, ...prev]);
+    setLastDeleted(null);
+  }
+
+  async function handleUpload(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("http://localhost:3000/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      throw new Error("Upload failed");
+    }
+
+    return res.json();
+  }
+
   const [filter, setFilter] = useState("all"); // all|active|completed
   const [sort, setSort] = useState("default"); // default|due|priority|created
   const [search, setSearch] = useState(""); // optional v1
@@ -628,7 +671,6 @@ export default function App({ onLogout, userEmail, onUploadFile }) {
     const baseMonday = startOfWeekMonday(new Date());
     return addDays(baseMonday, weekOffset * 7);
   }, [weekOffset]);
-  const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
   const weekDays = useMemo(() => {
     const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     return names.map((name, i) => {
@@ -646,8 +688,6 @@ export default function App({ onLogout, userEmail, onUploadFile }) {
       };
     });
   }, [weekStart, todayISO]);
-
-  // Remove localStorage sync - now handled by database
 
   const editingTask = useMemo(() => tasks.find(t => t.id === editingId) || null, [tasks, editingId]);
 
@@ -1002,18 +1042,6 @@ export default function App({ onLogout, userEmail, onUploadFile }) {
         <div className="branding">
           <h1 className="appTitle">TOUXDOUX</h1>
           <p className="copyright">Private and Confidential Wael Ibrahim © 2026 version 1.23</p>
-          {userEmail && (
-            <div style={{ marginTop: '5px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' }}>
-              <span>{userEmail}</span>
-              <button
-                onClick={onLogout}
-                className="secondaryBtn"
-                style={{ padding: '2px 8px', fontSize: '11px' }}
-              >
-                Logout
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1172,7 +1200,7 @@ export default function App({ onLogout, userEmail, onUploadFile }) {
                   <div className="completedSection">
                     <div className="completedHeader">Done ({completedTasks.length})</div>
                     {completedTasks.map((t) => (
-                      <div className="completedTask" key={t.id}>
+                      <div className="completedTask" key={t.id} style={{ position: 'relative', paddingRight: '45px' }}>
                         <input
                           className="checkbox small"
                           type="checkbox"
@@ -1182,6 +1210,14 @@ export default function App({ onLogout, userEmail, onUploadFile }) {
                           title="Click to restore task"
                         />
                         <span className="completedTitle">{t.title}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            permanentlyDelete(t.id);
+                          }}
+                          className="permanentDeleteBtn"
+                          title="Permanently Delete"
+                        />
                       </div>
                     ))}
                   </div>
@@ -1226,7 +1262,7 @@ export default function App({ onLogout, userEmail, onUploadFile }) {
         onCancel={closeModal}
         onSave={handleSaveFromModal}
         onDelete={handleDelete}
-        onUploadFile={onUploadFile}
+        onUploadFile={handleUpload}
       />
 
       <BulkTaskModal

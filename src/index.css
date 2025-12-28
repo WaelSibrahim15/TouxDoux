@@ -955,3 +955,28 @@ select {
     grid-template-columns: 1fr;
   }
 }
+.permanentDeleteBtn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #ff073a;
+  font-weight: bold;
+  font-size: 10px;
+  text-shadow: 0 0 2px rgba(255, 7, 58, 0.5);
+  padding: 0;
+  min-width: 15px;
+  text-align: right;
+}
+
+.permanentDeleteBtn::after {
+  content: "D";
+  transition: content 0.2s;
+}
+
+.permanentDeleteBtn:hover::after {
+  content: "delete?";
+  font-size: 10px;
+}
