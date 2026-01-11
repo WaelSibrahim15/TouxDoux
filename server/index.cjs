@@ -121,12 +121,13 @@ try {
 // ---------- Security / Middleware ----------
 app.use(helmet());
 
-// ✅ CORS (for dev). If you use Vite proxy, you can disable this entirely.
+// ✅ CORS (for dev and production)
 // When using cookie sessions + cross-origin requests, credentials must be true.
 const ALLOWED_ORIGINS = [
     "http://localhost:5173", // Vite dev
-    // "https://yourdomain.com",
-];
+    process.env.RAILWAY_PUBLIC_DOMAIN, // Railway public domain
+    process.env.VITE_APP_URL, // Custom app URL
+].filter(Boolean);
 
 app.use(
     cors({
@@ -354,6 +355,21 @@ app.get("/api/files/:id", (req, res) => {
     res.setHeader("Content-Disposition", `${disposition}; filename="${file.original_name.replace(/"/g, "")}"`);
     res.sendFile(fullPath);
 });
+
+// ---------- Serve static files from Vite build in production ----------
+if (process.env.NODE_ENV === "production") {
+    const distPath = path.join(__dirname, "..", "dist");
+    if (fs.existsSync(distPath)) {
+        app.use(express.static(distPath));
+        
+        // Serve index.html for all non-API routes (SPA routing)
+        app.get("*", (req, res) => {
+            if (!req.path.startsWith("/api")) {
+                res.sendFile(path.join(distPath, "index.html"));
+            }
+        });
+    }
+}
 
 // ---------- Error handler ----------
 app.use((err, req, res, next) => {
