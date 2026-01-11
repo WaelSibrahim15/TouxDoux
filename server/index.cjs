@@ -370,20 +370,28 @@ app.get("/api/files/:id", (req, res) => {
 // ---------- Serve static files from Vite build in production ----------
 if (process.env.NODE_ENV === "production") {
     const distPath = path.join(__dirname, "..", "dist");
+    console.log(`🔍 Checking for dist folder at: ${distPath}`);
     if (fs.existsSync(distPath)) {
+        console.log(`✅ Found dist folder, serving static files`);
         app.use(express.static(distPath));
         
         // Serve index.html for all non-API routes (SPA routing)
         // This must be before the error handler
         app.get("*", (req, res, next) => {
             if (!req.path.startsWith("/api")) {
-                res.sendFile(path.join(distPath, "index.html"), (err) => {
-                    if (err) next(err);
+                const indexPath = path.join(distPath, "index.html");
+                res.sendFile(indexPath, (err) => {
+                    if (err) {
+                        console.error(`❌ Error serving index.html:`, err);
+                        next(err);
+                    }
                 });
             } else {
                 next();
             }
         });
+    } else {
+        console.warn(`⚠️  Dist folder not found at ${distPath} - static files will not be served`);
     }
 }
 
@@ -394,4 +402,12 @@ app.use((err, req, res, next) => {
     res.status(status).json({ error: msg });
 });
 
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`✅ Server running on port ${PORT}`);
+    console.log(`📁 Uploads: ${UPLOADS_DIR}`);
+    console.log(`💾 Database: ${DB_PATH}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+}).on("error", (err) => {
+    console.error("❌ Failed to start server:", err);
+    process.exit(1);
+});
