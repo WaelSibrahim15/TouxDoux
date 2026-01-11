@@ -58,11 +58,22 @@ const UPLOADS_DIR = DEFAULT_UPLOADS_DIR;
 const DB_PATH = DEFAULT_DB_PATH;
 
 // Ensure directories exist
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-if (!fs.existsSync(path.dirname(DB_PATH))) fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-
-console.log(`📁 Uploads directory: ${UPLOADS_DIR}`);
-console.log(`💾 Database path: ${DB_PATH}`);
+try {
+    if (!fs.existsSync(UPLOADS_DIR)) {
+        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+        console.log(`✅ Created uploads directory: ${UPLOADS_DIR}`);
+    }
+    const dbDir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dbDir)) {
+        fs.mkdirSync(dbDir, { recursive: true });
+        console.log(`✅ Created database directory: ${dbDir}`);
+    }
+    console.log(`📁 Uploads directory: ${UPLOADS_DIR}`);
+    console.log(`💾 Database path: ${DB_PATH}`);
+} catch (err) {
+    console.error("❌ Failed to create directories:", err);
+    process.exit(1);
+}
 
 // ---------- DB ----------
 let db;
