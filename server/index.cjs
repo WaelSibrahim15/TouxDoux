@@ -16,6 +16,11 @@ const PORT = process.env.PORT || 3000;
 
 // ---------- Platform-specific user data directory helper ----------
 function getUserDataDir() {
+    // On Railway or production, use a simple data directory
+    if (process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === "production") {
+        return path.join(__dirname, "data");
+    }
+    
     const os = require("os");
     const platform = os.platform();
     const homeDir = os.homedir();
@@ -60,8 +65,14 @@ console.log(`📁 Uploads directory: ${UPLOADS_DIR}`);
 console.log(`💾 Database path: ${DB_PATH}`);
 
 // ---------- DB ----------
-const db = new Database(DB_PATH);
-db.pragma("journal_mode = WAL");
+let db;
+try {
+    db = new Database(DB_PATH);
+    db.pragma("journal_mode = WAL");
+} catch (err) {
+    console.error("Failed to initialize database:", err);
+    process.exit(1);
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -363,9 +374,14 @@ if (process.env.NODE_ENV === "production") {
         app.use(express.static(distPath));
         
         // Serve index.html for all non-API routes (SPA routing)
-        app.get("*", (req, res) => {
+        // This must be before the error handler
+        app.get("*", (req, res, next) => {
             if (!req.path.startsWith("/api")) {
-                res.sendFile(path.join(distPath, "index.html"));
+                res.sendFile(path.join(distPath, "index.html"), (err) => {
+                    if (err) next(err);
+                });
+            } else {
+                next();
             }
         });
     }
