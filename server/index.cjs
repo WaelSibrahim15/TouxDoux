@@ -14,11 +14,50 @@ const Database = require("better-sqlite3");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ---------- Paths ----------
-const UPLOADS_DIR = path.resolve(__dirname, "uploads");
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+// ---------- Platform-specific user data directory helper ----------
+function getUserDataDir() {
+    const os = require("os");
+    const platform = os.platform();
+    const homeDir = os.homedir();
 
-const DB_PATH = path.resolve(__dirname, "touxdoux.db");
+    if (platform === "darwin") {
+        // macOS
+        return path.join(homeDir, "Library", "Application Support", "touxdoux");
+    } else if (platform === "win32") {
+        // Windows
+        return path.join(process.env.APPDATA || homeDir, "touxdoux");
+    } else {
+        // Linux and others
+        return path.join(homeDir, ".local", "share", "touxdoux");
+    }
+}
+
+// ---------- Paths with environment variable support ----------
+// Priority: 1. Environment variable, 2. Existing database in server dir (migration), 3. User data directory
+const OLD_DB_PATH = path.resolve(__dirname, "touxdoux.db");
+const OLD_UPLOADS_DIR = path.resolve(__dirname, "uploads");
+
+const DEFAULT_UPLOADS_DIR = process.env.UPLOADS_DIR
+    ? path.resolve(process.env.UPLOADS_DIR)
+    : fs.existsSync(OLD_UPLOADS_DIR) && fs.readdirSync(OLD_UPLOADS_DIR).length > 0
+    ? OLD_UPLOADS_DIR // Use old location if it has files (migration)
+    : path.join(getUserDataDir(), "uploads");
+
+const DEFAULT_DB_PATH = process.env.DB_PATH
+    ? path.resolve(process.env.DB_PATH)
+    : fs.existsSync(OLD_DB_PATH)
+    ? OLD_DB_PATH // Use old location if it exists (migration)
+    : path.join(getUserDataDir(), "touxdoux.db");
+
+const UPLOADS_DIR = DEFAULT_UPLOADS_DIR;
+const DB_PATH = DEFAULT_DB_PATH;
+
+// Ensure directories exist
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+if (!fs.existsSync(path.dirname(DB_PATH))) fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+
+console.log(`📁 Uploads directory: ${UPLOADS_DIR}`);
+console.log(`💾 Database path: ${DB_PATH}`);
 
 // ---------- DB ----------
 const db = new Database(DB_PATH);
@@ -34,7 +73,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS files (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
+  user_id INTEGER,
   stored_name TEXT NOT NULL,
   original_name TEXT NOT NULL,
   mime TEXT NOT NULL,
@@ -44,7 +83,40 @@ CREATE TABLE IF NOT EXISTS files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id INTEGER PRIMARY KEY,
+  download_location TEXT,
+  export_location TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 `);
+
+// Migrate files table to allow NULL user_id (for anonymous uploads)
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS files_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER,
+          stored_name TEXT NOT NULL,
+          original_name TEXT NOT NULL,
+          mime TEXT NOT NULL,
+          size INTEGER NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        INSERT INTO files_new SELECT * FROM files;
+        DROP TABLE files;
+        ALTER TABLE files_new RENAME TO files;
+        CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
+    `);
+} catch (err) {
+    // Migration already done or table doesn't exist yet, ignore
+    if (!String(err.message).includes("no such table")) {
+        console.log("Migration note:", err.message);
+    }
+}
 
 // ---------- Security / Middleware ----------
 app.use(helmet());
@@ -186,9 +258,43 @@ app.get("/api/auth/me", (req, res) => {
     res.json({ user: user || null });
 });
 
+// ---------- Settings routes ----------
+app.get("/api/settings", requireAuth, (req, res) => {
+    const settings = db.prepare("SELECT download_location, export_location FROM user_settings WHERE user_id = ?").get(req.session.userId);
+    res.json({
+        downloadLocation: settings?.download_location || null,
+        exportLocation: settings?.export_location || null,
+    });
+});
+
+app.put("/api/settings", requireAuth, (req, res) => {
+    const { downloadLocation, exportLocation } = req.body || {};
+
+    const stmt = db.prepare(`
+        INSERT INTO user_settings (user_id, download_location, export_location, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(user_id) DO UPDATE SET
+            download_location = excluded.download_location,
+            export_location = excluded.export_location,
+            updated_at = datetime('now')
+    `);
+
+    stmt.run(
+        req.session.userId,
+        downloadLocation || null,
+        exportLocation || null
+    );
+
+    res.json({ ok: true });
+});
+
 // ---------- Upload (private + owned) ----------
-app.post("/api/upload", requireAuth, upload.single("file"), (req, res) => {
+// Allow uploads with or without authentication
+app.post("/api/upload", upload.single("file"), (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    // Use session userId if authenticated, otherwise use NULL (anonymous)
+    const userId = req.session?.userId || null;
 
     const insert = db.prepare(`
     INSERT INTO files (user_id, stored_name, original_name, mime, size)
@@ -196,7 +302,7 @@ app.post("/api/upload", requireAuth, upload.single("file"), (req, res) => {
   `);
 
     const info = insert.run(
-        req.session.userId,
+        userId,
         req.file.filename,
         req.file.originalname,
         req.file.mimetype,
@@ -213,22 +319,39 @@ app.post("/api/upload", requireAuth, upload.single("file"), (req, res) => {
 });
 
 // ---------- Download (private + ownership enforced) ----------
-app.get("/api/files/:id", requireAuth, (req, res) => {
+app.get("/api/files/:id", (req, res) => {
     const id = req.params.id;
 
     const file = db.prepare("SELECT * FROM files WHERE id = ?").get(id);
     if (!file) return res.status(404).json({ error: "Not found" });
 
-    if (file.user_id !== req.session.userId) {
-        return res.status(403).json({ error: "Forbidden" });
+    // If authenticated, check ownership. If not authenticated, allow access to anonymous files (user_id = NULL)
+    if (req.session?.userId) {
+        if (file.user_id !== req.session.userId && file.user_id !== null) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+    } else {
+        // Not authenticated - only allow access to anonymous files
+        if (file.user_id !== null) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
     }
 
     const fullPath = path.join(UPLOADS_DIR, file.stored_name);
     if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "File missing on disk" });
 
     res.setHeader("Content-Type", file.mime);
-    // inline opens in browser when possible; change to attachment to force download
-    res.setHeader("Content-Disposition", `inline; filename="${file.original_name.replace(/"/g, "")}"`);
+    
+    // Check user's download preference if authenticated
+    let forceDownload = false;
+    if (req.session?.userId) {
+        const settings = db.prepare("SELECT download_location FROM user_settings WHERE user_id = ?").get(req.session.userId);
+        forceDownload = settings?.download_location !== null;
+    }
+    
+    // inline opens in browser when possible; attachment forces download
+    const disposition = forceDownload ? "attachment" : "inline";
+    res.setHeader("Content-Disposition", `${disposition}; filename="${file.original_name.replace(/"/g, "")}"`);
     res.sendFile(fullPath);
 });
 

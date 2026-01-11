@@ -124,6 +124,46 @@ All tasks are stored securely in a local database on your computer:
 - ✅ **Persistent Storage** - Tasks survive resets
 - 🔒 **Local Privacy** - Data never leaves your machine
 
+## Storage Configuration
+
+### Default Storage Locations
+
+The app uses platform-specific user data directories by default:
+
+- **macOS**: `~/Library/Application Support/touxdoux/`
+- **Windows**: `%APPDATA%/touxdoux/`
+- **Linux**: `~/.local/share/touxdoux/`
+
+Files are stored in:
+- **Uploads**: `{user_data_dir}/uploads/`
+- **Database**: `{user_data_dir}/touxdoux.db`
+
+### Environment Variables
+
+You can customize storage paths using environment variables:
+
+```bash
+# Custom upload directory
+export UPLOADS_DIR=/path/to/custom/uploads
+
+# Custom database location
+export DB_PATH=/path/to/custom/database.db
+
+# Server port (default: 3000)
+export PORT=3000
+
+# Session secret (change in production!)
+export SESSION_SECRET=your-secret-key
+```
+
+### User Settings
+
+Users can configure preferences through the Settings UI (⚙️ button in the top bar):
+- **Download Location**: Choose whether files open in browser or force download
+- **Export Location**: Set preferred location for task reports (stored as preference)
+
+**Note**: Due to browser security restrictions, you cannot directly set the download folder path. The setting controls whether files open in the browser or are forced to download to your browser's default download location.
+
 ## 🚀 Setup Instructions
 
 **Simpler than ever:**

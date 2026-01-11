@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const STORAGE_KEY = "touxdoux_tasks_v1";
+const THEME_KEY = "touxdoux_theme_v1";
 
 // ✅ API helpers (works with Vite proxy; supports cookie sessions)
 const API = {
@@ -610,6 +611,170 @@ function PrintTasksModal({ open, onCancel, tasks, formatDate }) {
     </div>
   );
 }
+function ThemeSelector({ open, onClose, currentTheme, onThemeChange }) {
+  const themes = [
+    { id: "cinnamon", name: "Cinnamon", color: "#f5e6d3" },
+    { id: "neutral-gray", name: "Neutral Gray", color: "#e0e0e0" },
+    { id: "dark-mode", name: "Dark Mode", color: "#e9ecf1" },
+    { id: "blue-gray", name: "Blue Gray", color: "#e1e8f0" },
+    { id: "rose-quartz", name: "Rose Quartz", color: "#f5e6ea" },
+  ];
+
+  if (!open) return null;
+
+  return (
+    <div className="modalBackdrop" onMouseDown={onClose}>
+      <div className="themeModal" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <h2>SELECT THEME</h2>
+          <button className="iconBtn" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <div className="themeList">
+          {themes.map((theme) => (
+            <div
+              key={theme.id}
+              className={`themeOption ${currentTheme === theme.id ? "selected" : ""}`}
+              onClick={() => {
+                onThemeChange(theme.id);
+                onClose();
+              }}
+            >
+              <div className="themeSwatch" style={{ backgroundColor: theme.color }}></div>
+              <span className="themeName">{theme.name}</span>
+              {currentTheme === theme.id && <span className="themeCheck">✓</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsModal({ open, onCancel }) {
+  const [downloadLocation, setDownloadLocation] = useState("");
+  const [exportLocation, setExportLocation] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setError("");
+    setLoading(true);
+    apiJSON("/api/settings")
+      .then((data) => {
+        setDownloadLocation(data.downloadLocation || "");
+        setExportLocation(data.exportLocation || "");
+      })
+      .catch((err) => {
+        setError(err.message || "Failed to load settings");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [open]);
+
+  async function handleSave() {
+    setError("");
+    setSaving(true);
+    try {
+      await apiJSON("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          downloadLocation: downloadLocation.trim() || null,
+          exportLocation: exportLocation.trim() || null,
+        }),
+      });
+      onCancel();
+    } catch (err) {
+      setError(err.message || "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="modalBackdrop" onMouseDown={onCancel}>
+      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <h2>Settings</h2>
+          <button className="iconBtn" onClick={onCancel} aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        <div className="modalBody">
+          {error ? <div className="error">{error}</div> : null}
+
+          {loading ? (
+            <div style={{ padding: "20px", textAlign: "center" }}>Loading settings...</div>
+          ) : (
+            <>
+              <div className="field">
+                <label>Download Location Preference</label>
+                <p style={{ fontSize: "12px", color: "#666", marginBottom: "8px" }}>
+                  Set a custom path to force downloads instead of opening in browser. Leave empty to use browser default.
+                  <br />
+                  <strong>Note:</strong> Due to browser security, you cannot directly set the download folder. This setting
+                  forces files to download instead of opening in the browser.
+                </p>
+                <select
+                  value={downloadLocation}
+                  onChange={(e) => setDownloadLocation(e.target.value)}
+                  style={{ width: "100%" }}
+                >
+                  <option value="">Use browser default (open in browser)</option>
+                  <option value="download">Force download (use browser's download folder)</option>
+                </select>
+              </div>
+
+              <div className="field">
+                <label>Export/Backup Location</label>
+                <p style={{ fontSize: "12px", color: "#666", marginBottom: "8px" }}>
+                  Preferred location for exporting task reports and backups. This is a preference only - actual location
+                  depends on your browser's download settings.
+                </p>
+                <input
+                  type="text"
+                  value={exportLocation}
+                  onChange={(e) => setExportLocation(e.target.value)}
+                  placeholder="e.g., ~/Documents/touxdoux-exports"
+                  style={{ width: "100%" }}
+                />
+                <p style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                  This is stored as a preference. Actual exports will use your browser's download location.
+                </p>
+              </div>
+
+              <div className="field" style={{ marginTop: "20px", padding: "12px", background: "#f5f5f5", borderRadius: "4px" }}>
+                <strong style={{ fontSize: "13px" }}>Storage Information:</strong>
+                <div style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}>
+                  <div>• Server uploads: Configured via UPLOADS_DIR environment variable</div>
+                  <div>• Database: Configured via DB_PATH environment variable</div>
+                  <div>• Default locations use platform-specific user data directories</div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="modalFooter">
+          <button className="secondaryBtn" onClick={onCancel} disabled={saving}>
+            Cancel
+          </button>
+          <button className="primaryBtn" onClick={handleSave} disabled={loading || saving}>
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AuthScreen({ onAuth }) {
   const [mode, setMode] = useState("login"); // login | register
   const [email, setEmail] = useState("");
@@ -685,14 +850,23 @@ function AuthScreen({ onAuth }) {
     </div>
   );
 }
-
-
 export default function App() {
   const [tasks, setTasks] = useState(() => loadTasks());
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem(THEME_KEY);
+    return saved || "dark-mode";
+  });
+  const [themeModalOpen, setThemeModalOpen] = useState(false);
 
   useEffect(() => {
     saveTasks(tasks);
   }, [tasks]);
+
+  // Apply theme on mount and when it changes
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
 
   const [lastDeleted, setLastDeleted] = useState(null);
 
@@ -749,6 +923,7 @@ export default function App() {
   const [editingId, setEditingId] = useState(null);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   const [printModalOpen, setPrintModalOpen] = useState(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
 
   const todayISO = toISODate(new Date());
@@ -1087,11 +1262,22 @@ export default function App() {
           <button className="softRedBtn" onClick={() => setPrintModalOpen(true)}>
             {"{print tasks}"}
           </button>
+          <button className="secondaryBtn" onClick={() => setSettingsModalOpen(true)} title="Settings">
+            ⚙️ Settings
+          </button>
+          <button className="themeBtn" onClick={() => setThemeModalOpen(true)} title="Change Theme">
+            <span>Theme</span>
+            <span className="themeIcon">☀️</span>
+          </button>
         </div>
 
         <div className="branding">
           <h1 className="appTitle">TOUXDOUX</h1>
-          <p className="copyright">Private and Confidential Wael Ibrahim © 2026 version 1.23</p>
+          <div className="copyright">
+            <span className="copyright-line">Private and Confidential</span>
+            <span className="copyright-line">Wael Ibrahim © 2026</span>
+            <span className="version">v1.23</span>
+          </div>
         </div>
       </div>
 
@@ -1262,6 +1448,15 @@ export default function App() {
       <BulkTaskModal open={bulkModalOpen} onCancel={() => setBulkModalOpen(false)} onExport={handleBulkExport} />
 
       <PrintTasksModal open={printModalOpen} onCancel={() => setPrintModalOpen(false)} tasks={tasks} formatDate={formatDisplayDate} />
+
+      <SettingsModal open={settingsModalOpen} onCancel={() => setSettingsModalOpen(false)} />
+
+      <ThemeSelector
+        open={themeModalOpen}
+        onClose={() => setThemeModalOpen(false)}
+        currentTheme={theme}
+        onThemeChange={setTheme}
+      />
     </div>
   );
 }
