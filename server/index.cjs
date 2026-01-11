@@ -1,3 +1,9 @@
+// Log startup immediately
+console.log("🚀 Starting TouxDoux server...");
+console.log("📦 Node version:", process.version);
+console.log("📂 Working directory:", process.cwd());
+console.log("🌍 Environment:", process.env.NODE_ENV || "development");
+
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -7,6 +13,8 @@ const multer = require("multer");
 const session = require("express-session");
 const bcrypt = require("bcrypt");
 const Database = require("better-sqlite3");
+
+console.log("✅ All modules loaded successfully");
 
 // If you installed dotenv, uncomment:
 // require("dotenv").config();
