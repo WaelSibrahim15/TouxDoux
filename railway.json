@@ -4,6 +4,7 @@
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10,
     "healthcheckPath": "/health",
-    "healthcheckTimeout": 100
+    "healthcheckTimeout": 300,
+    "startCommand": "node server/index.cjs"
   }
 }
