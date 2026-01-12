@@ -408,17 +408,17 @@ app.get("/api/files/:id", (req, res) => {
     res.sendFile(fullPath);
 });
 
+// Health check endpoint (always available)
+app.get("/health", (req, res) => {
+    res.status(200).json({ status: "ok" });
+});
+
 // ---------- Serve static files from Vite build in production ----------
 if (process.env.NODE_ENV === "production") {
     const distPath = path.join(__dirname, "..", "dist");
     console.log(`🔍 Checking for dist folder at: ${distPath}`);
     if (fs.existsSync(distPath)) {
         console.log(`✅ Found dist folder, serving static files`);
-
-        // Health check endpoint (before catch-all route)
-        app.get("/health", (req, res) => {
-            res.status(200).json({ status: "ok" });
-        });
 
         // Serve assets (JS/CSS) before any other static middleware
         app.use("/assets", express.static(path.join(distPath, "assets")));
