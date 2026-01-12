@@ -22,13 +22,18 @@ console.log("✅ All modules loaded successfully");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ✅ Railway/HTTPS proxy support (needed for secure cookies behind Railway)
+if (process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+}
+
 // ---------- Platform-specific user data directory helper ----------
 function getUserDataDir() {
     // On Railway or production, use a simple data directory
     if (process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === "production") {
         return path.join(__dirname, "data");
     }
-    
+
     const os = require("os");
     const platform = os.platform();
     const homeDir = os.homedir();
@@ -53,14 +58,14 @@ const OLD_UPLOADS_DIR = path.resolve(__dirname, "uploads");
 const DEFAULT_UPLOADS_DIR = process.env.UPLOADS_DIR
     ? path.resolve(process.env.UPLOADS_DIR)
     : fs.existsSync(OLD_UPLOADS_DIR) && fs.readdirSync(OLD_UPLOADS_DIR).length > 0
-    ? OLD_UPLOADS_DIR // Use old location if it has files (migration)
-    : path.join(getUserDataDir(), "uploads");
+        ? OLD_UPLOADS_DIR // Use old location if it has files (migration)
+        : path.join(getUserDataDir(), "uploads");
 
 const DEFAULT_DB_PATH = process.env.DB_PATH
     ? path.resolve(process.env.DB_PATH)
     : fs.existsSync(OLD_DB_PATH)
-    ? OLD_DB_PATH // Use old location if it exists (migration)
-    : path.join(getUserDataDir(), "touxdoux.db");
+        ? OLD_DB_PATH // Use old location if it exists (migration)
+        : path.join(getUserDataDir(), "touxdoux.db");
 
 const UPLOADS_DIR = DEFAULT_UPLOADS_DIR;
 const DB_PATH = DEFAULT_DB_PATH;
@@ -151,22 +156,39 @@ try {
 // ---------- Security / Middleware ----------
 app.use(helmet());
 
-// ✅ CORS (for dev and production)
-// When using cookie sessions + cross-origin requests, credentials must be true.
+// ✅ CORS ONLY for API routes (don't apply to static assets)
 const ALLOWED_ORIGINS = [
-    "http://localhost:5173", // Vite dev
-    process.env.RAILWAY_PUBLIC_DOMAIN, // Railway public domain
-    process.env.VITE_APP_URL, // Custom app URL
+    "http://localhost:5173",
+    process.env.VITE_APP_URL,                 // should include scheme
+    process.env.APP_URL,                      // optional
+    process.env.PUBLIC_URL,                   // optional
 ].filter(Boolean);
 
+// helper: normalize Railway domain if it exists
+function isAllowedOrigin(origin) {
+    if (!origin) return true;
+
+    // allow exact matches
+    if (ALLOWED_ORIGINS.includes(origin)) return true;
+
+    // allow Railway public domain even if env var is just the hostname
+    const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN;
+    if (railwayDomain) {
+        if (origin === `https://${railwayDomain}`) return true;
+        if (origin === `http://${railwayDomain}`) return true;
+    }
+
+    return false;
+}
+
 app.use(
+    "/api",
     cors({
         origin(origin, cb) {
-            if (!origin) return cb(null, true); // curl/postman
-            if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+            if (isAllowedOrigin(origin)) return cb(null, true);
             return cb(new Error("Not allowed by CORS"));
         },
-        credentials: true, // IMPORTANT for cookies
+        credentials: true,
     })
 );
 
@@ -182,7 +204,7 @@ app.use(
         cookie: {
             httpOnly: true,
             sameSite: "lax",
-            secure: false, // set true in production behind HTTPS
+            secure: process.env.NODE_ENV === "production", // ✅ secure cookies over HTTPS
             maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         },
     })
@@ -372,14 +394,14 @@ app.get("/api/files/:id", (req, res) => {
     if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "File missing on disk" });
 
     res.setHeader("Content-Type", file.mime);
-    
+
     // Check user's download preference if authenticated
     let forceDownload = false;
     if (req.session?.userId) {
         const settings = db.prepare("SELECT download_location FROM user_settings WHERE user_id = ?").get(req.session.userId);
         forceDownload = settings?.download_location !== null;
     }
-    
+
     // inline opens in browser when possible; attachment forces download
     const disposition = forceDownload ? "attachment" : "inline";
     res.setHeader("Content-Disposition", `${disposition}; filename="${file.original_name.replace(/"/g, "")}"`);
@@ -392,8 +414,11 @@ if (process.env.NODE_ENV === "production") {
     console.log(`🔍 Checking for dist folder at: ${distPath}`);
     if (fs.existsSync(distPath)) {
         console.log(`✅ Found dist folder, serving static files`);
+        // Serve assets (JS/CSS) before any other static middleware
+        app.use("/assets", express.static(path.join(distPath, "assets")));
+        // Serve remaining static files (including index.html)
         app.use(express.static(distPath));
-        
+
         // Serve index.html for all non-API routes (SPA routing)
         // This must be before the error handler
         app.get("*", (req, res, next) => {
