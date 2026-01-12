@@ -654,7 +654,7 @@ function ThemeSelector({ open, onClose, currentTheme, onThemeChange }) {
 
 function SettingsModal({ open, onCancel }) {
   const [downloadLocation, setDownloadLocation] = useState("");
-  const [exportLocation, setExportLocation] = useState("");
+
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -666,7 +666,7 @@ function SettingsModal({ open, onCancel }) {
     apiJSON("/api/settings")
       .then((data) => {
         setDownloadLocation(data.downloadLocation || "");
-        setExportLocation(data.exportLocation || "");
+        // setExportLocation(data.exportLocation || ""); // Unused
       })
       .catch((err) => {
         setError(err.message || "Failed to load settings");
@@ -684,7 +684,7 @@ function SettingsModal({ open, onCancel }) {
         method: "PUT",
         body: JSON.stringify({
           downloadLocation: downloadLocation.trim() || null,
-          exportLocation: exportLocation.trim() || null,
+          // exportLocation: exportLocation.trim() || null,
         }),
       });
       onCancel();
@@ -715,47 +715,27 @@ function SettingsModal({ open, onCancel }) {
           ) : (
             <>
               <div className="field">
-                <label>Download Location Preference</label>
+                <label>File Viewing Preference</label>
                 <p style={{ fontSize: "12px", color: "#666", marginBottom: "8px" }}>
-                  Set a custom path to force downloads instead of opening in browser. Leave empty to use browser default.
-                  <br />
-                  <strong>Note:</strong> Due to browser security, you cannot directly set the download folder. This setting
-                  forces files to download instead of opening in the browser.
+                  Choose how you want to view attached files.
                 </p>
                 <select
                   value={downloadLocation}
                   onChange={(e) => setDownloadLocation(e.target.value)}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #ccc" }}
                 >
-                  <option value="">Use browser default (open in browser)</option>
-                  <option value="download">Force download (use browser's download folder)</option>
+                  <option value="">Preview in browser (Default)</option>
+                  <option value="download">Always Download</option>
                 </select>
               </div>
 
-              <div className="field">
-                <label>Export/Backup Location</label>
-                <p style={{ fontSize: "12px", color: "#666", marginBottom: "8px" }}>
-                  Preferred location for exporting task reports and backups. This is a preference only - actual location
-                  depends on your browser's download settings.
-                </p>
-                <input
-                  type="text"
-                  value={exportLocation}
-                  onChange={(e) => setExportLocation(e.target.value)}
-                  placeholder="e.g., ~/Documents/touxdoux-exports"
-                  style={{ width: "100%" }}
-                />
-                <p style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
-                  This is stored as a preference. Actual exports will use your browser's download location.
-                </p>
-              </div>
+              {/* Export location removed as it was unused/confusing in web context */}
 
               <div className="field" style={{ marginTop: "20px", padding: "12px", background: "#f5f5f5", borderRadius: "4px" }}>
-                <strong style={{ fontSize: "13px" }}>Storage Information:</strong>
+                <strong style={{ fontSize: "13px" }}>Account Storage</strong>
                 <div style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}>
-                  <div>• Server uploads: Configured via UPLOADS_DIR environment variable</div>
-                  <div>• Database: Configured via DB_PATH environment variable</div>
-                  <div>• Default locations use platform-specific user data directories</div>
+                  <div>• Cloud Storage: <strong>Active</strong></div>
+                  <div>• Your data is securely stored on the server.</div>
                 </div>
               </div>
             </>
