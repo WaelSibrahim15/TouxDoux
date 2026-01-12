@@ -22,6 +22,12 @@ console.log("✅ All modules loaded successfully");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// 🔍 LOGGING - ABSOLUTE TOP
+app.use((req, res, next) => {
+    console.log(`🔍 [${new Date().toISOString()}] ${req.method} ${req.path}`);
+    next();
+});
+
 // ✅ Railway/HTTPS proxy support (needed for secure cookies behind Railway)
 if (process.env.NODE_ENV === "production") {
     app.set("trust proxy", 1);
@@ -409,10 +415,7 @@ app.get("/api/files/:id", (req, res) => {
 });
 
 // Log all requests for debugging (BEFORE all routes)
-app.use((req, res, next) => {
-    console.log(`📥 ${req.method} ${req.path}`);
-    next();
-});
+
 
 // Health check endpoint (always available)
 app.get("/health", (req, res) => {
@@ -426,6 +429,11 @@ if (process.env.NODE_ENV === "production") {
     console.log(`🔍 Checking for dist folder at: ${distPath}`);
     if (fs.existsSync(distPath)) {
         console.log(`✅ Found dist folder, serving static files`);
+
+        // TEST ROUTE: Ensure we can serve root
+        app.get("/test-root", (req, res) => {
+            res.send("Hello from TouxDoux Server!");
+        });
 
         // Serve assets (JS/CSS) before any other static middleware
         app.use("/assets", express.static(path.join(distPath, "assets")));
