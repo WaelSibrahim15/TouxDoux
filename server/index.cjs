@@ -414,6 +414,12 @@ if (process.env.NODE_ENV === "production") {
     console.log(`🔍 Checking for dist folder at: ${distPath}`);
     if (fs.existsSync(distPath)) {
         console.log(`✅ Found dist folder, serving static files`);
+
+        // Health check endpoint (before catch-all route)
+        app.get("/health", (req, res) => {
+            res.status(200).json({ status: "ok" });
+        });
+
         // Serve assets (JS/CSS) before any other static middleware
         app.use("/assets", express.static(path.join(distPath, "assets")));
         // Serve remaining static files (including index.html)
