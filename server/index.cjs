@@ -468,7 +468,7 @@ app.use((err, req, res, next) => {
     res.status(status).json({ error: msg });
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`📁 Uploads: ${UPLOADS_DIR}`);
     console.log(`💾 Database: ${DB_PATH}`);
@@ -477,3 +477,7 @@ app.listen(PORT, "0.0.0.0", () => {
     console.error("❌ Failed to start server:", err);
     process.exit(1);
 });
+
+// ✅ Fix 502 Errors: Keep-Alive Timeout > Railway Load Balancer Timeout (60s)
+server.keepAliveTimeout = 120 * 1000;
+server.headersTimeout = 120 * 1000;
