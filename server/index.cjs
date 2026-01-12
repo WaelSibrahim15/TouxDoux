@@ -29,8 +29,9 @@ app.use((req, res, next) => {
 });
 
 // ✅ Railway/HTTPS proxy support (needed for secure cookies behind Railway)
+// ✅ Railway/HTTPS proxy support
 if (process.env.NODE_ENV === "production") {
-    app.set("trust proxy", 1);
+    app.set("trust proxy", true); // Trust all hops (Railway)
 }
 
 // ---------- Platform-specific user data directory helper ----------
@@ -160,7 +161,7 @@ try {
 }
 
 // ---------- Security / Middleware ----------
-app.use(helmet());
+// app.use(helmet()); // Temporarily disabled for debugging
 
 // ✅ CORS ONLY for API routes (don't apply to static assets)
 const ALLOWED_ORIGINS = [
