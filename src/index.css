@@ -173,6 +173,9 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
+
+
+
 .topbar {
   display: flex;
   flex-direction: row;
@@ -1161,6 +1164,7 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
 .permanentDeleteBtn {
   position: absolute;
   top: 2px;

@@ -25,5 +25,7 @@ dist-ssr
 
 # Backend
 server/touxdoux.db
+server/touxdoux.db-shm
+server/touxdoux.db-wal
 server/uploads/
 .env
