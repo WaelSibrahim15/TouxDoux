@@ -19,6 +19,6 @@ app.get("*", (req, res) => {
     res.send("<h1>Minimal Server Working!</h1>");
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`✅ Minimal server running on port ${PORT}`);
+app.listen(PORT, "::", () => {
+    console.log(`✅ Minimal server running on port ${PORT} (Bound to ::)`);
 });
