@@ -24,11 +24,8 @@ const app = express();
 // Railway configured this service to forward to port 3000 based on old Dockerfile
 const PORT = 3000;
 
-// 🔍 LOGGING - ABSOLUTE TOP
-app.use((req, res, next) => {
-    console.log(`🔍 [${new Date().toISOString()}] ${req.method} ${req.path}`);
-    next();
-});
+// 🔍 LOGGING - ABSOLUTE TOP (Removed for production)
+// app.use((req, res, next) => { ... });
 
 // ✅ Railway/HTTPS proxy support (needed for secure cookies behind Railway)
 // ✅ Railway/HTTPS proxy support
@@ -163,7 +160,7 @@ try {
 }
 
 // ---------- Security / Middleware ----------
-// app.use(helmet()); // Temporarily disabled for debugging
+app.use(helmet());
 
 // ✅ CORS ONLY for API routes (don't apply to static assets)
 const ALLOWED_ORIGINS = [
@@ -433,10 +430,7 @@ if (process.env.NODE_ENV === "production") {
     if (fs.existsSync(distPath)) {
         console.log(`✅ Found dist folder, serving static files`);
 
-        // TEST ROUTE: Ensure we can serve root
-        app.get("/test-root", (req, res) => {
-            res.send("Hello from TouxDoux Server!");
-        });
+
 
         // Serve assets (JS/CSS) before any other static middleware
         app.use("/assets", express.static(path.join(distPath, "assets")));
