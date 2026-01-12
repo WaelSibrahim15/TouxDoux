@@ -410,7 +410,14 @@ app.get("/api/files/:id", (req, res) => {
 
 // Health check endpoint (always available)
 app.get("/health", (req, res) => {
+    console.log("🏥 Health check requested");
     res.status(200).json({ status: "ok" });
+});
+
+// Log all requests for debugging
+app.use((req, res, next) => {
+    console.log(`📥 ${req.method} ${req.path}`);
+    next();
 });
 
 // ---------- Serve static files from Vite build in production ----------
