@@ -20,7 +20,9 @@ console.log("✅ All modules loaded successfully");
 // require("dotenv").config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+// ❌ Force Port 3000 to match Railway Dashboard "Public Networking" setting
+// Railway configured this service to forward to port 3000 based on old Dockerfile
+const PORT = 3000;
 
 // 🔍 LOGGING - ABSOLUTE TOP
 app.use((req, res, next) => {
