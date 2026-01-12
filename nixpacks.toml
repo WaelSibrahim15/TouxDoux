@@ -1,0 +1,2 @@
+# Force nixpacks to use nodejs provider
+providers = ["node"]
