@@ -13,6 +13,7 @@ const multer = require("multer");
 const session = require("express-session");
 const bcrypt = require("bcrypt");
 const Database = require("better-sqlite3");
+const { pool, pgQuery } = require("./pg.cjs"); // ✅ Single source of truth for Postgres
 
 console.log("✅ All modules loaded successfully");
 
@@ -203,7 +204,7 @@ app.use(express.json());
 // ✅ Sessions
 // ✅ Sessions
 const PgSession = require("connect-pg-simple")(session);
-const { pool } = require("./pg.cjs"); // Ensure this is imported if not already globally available
+// const { pool } = require("./pg.cjs"); // REMOVED (imported globally at top)
 
 if (process.env.NODE_ENV === "production") {
     app.set("trust proxy", 1);
@@ -497,7 +498,7 @@ app.use((err, req, res, next) => {
 });
 
 // Postgres Helper
-const { pool, pgQuery } = require("./pg.cjs");
+// const { pool, pgQuery } = require("./pg.cjs"); // REMOVED (imported globally at top)
 
 async function ensurePostgresSchema() {
     if (!pool) {
