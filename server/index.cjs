@@ -227,33 +227,40 @@ app.get("/api/auth/me", async (req, res, next) => {
 });
 
 // ---------- Settings routes ----------
-app.get("/api/settings", requireAuth, (req, res) => {
-    const settings = db.prepare("SELECT download_location, export_location FROM user_settings WHERE user_id = ?").get(req.session.userId);
-    res.json({
-        downloadLocation: settings?.download_location || null,
-        exportLocation: settings?.export_location || null,
-    });
+app.get("/api/settings", requireAuth, async (req, res, next) => {
+    try {
+        const r = await pgQuery(
+            "SELECT download_location, export_location FROM user_settings WHERE user_id = $1",
+            [req.session.userId]
+        );
+        const settings = r.rows[0];
+        res.json({
+            downloadLocation: settings?.download_location || null,
+            exportLocation: settings?.export_location || null,
+        });
+    } catch (err) {
+        next(err);
+    }
 });
 
-app.put("/api/settings", requireAuth, (req, res) => {
-    const { downloadLocation, exportLocation } = req.body || {};
+app.put("/api/settings", requireAuth, async (req, res, next) => {
+    try {
+        const { downloadLocation, exportLocation } = req.body || {};
 
-    const stmt = db.prepare(`
-        INSERT INTO user_settings (user_id, download_location, export_location, updated_at)
-        VALUES (?, ?, ?, datetime('now'))
-        ON CONFLICT(user_id) DO UPDATE SET
-            download_location = excluded.download_location,
-            export_location = excluded.export_location,
-            updated_at = datetime('now')
-    `);
+        await pgQuery(
+            `INSERT INTO user_settings (user_id, download_location, export_location, updated_at)
+             VALUES ($1, $2, $3, now())
+             ON CONFLICT(user_id) DO UPDATE SET
+                download_location = EXCLUDED.download_location,
+                export_location = EXCLUDED.export_location,
+                updated_at = now()`,
+            [req.session.userId, downloadLocation || null, exportLocation || null]
+        );
 
-    stmt.run(
-        req.session.userId,
-        downloadLocation || null,
-        exportLocation || null
-    );
-
-    res.json({ ok: true });
+        res.json({ ok: true });
+    } catch (err) {
+        next(err);
+    }
 });
 
 // ---------- Upload (private + owned) ----------
