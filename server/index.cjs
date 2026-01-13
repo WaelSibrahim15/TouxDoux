@@ -201,16 +201,31 @@ app.use(
 app.use(express.json());
 
 // ✅ Sessions
+// ✅ Sessions
+const PgSession = require("connect-pg-simple")(session);
+const { pool } = require("./pg.cjs"); // Ensure this is imported if not already globally available
+
+if (process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+}
+
 app.use(
     session({
         name: "touxdoux.sid",
+        store: pool
+            ? new PgSession({
+                pool,
+                tableName: "session",
+                createTableIfMissing: true,
+            })
+            : undefined, // fallback to MemoryStore if Postgres not configured
         secret: process.env.SESSION_SECRET || "dev-secret-change-me",
         resave: false,
         saveUninitialized: false,
         cookie: {
             httpOnly: true,
             sameSite: "lax",
-            secure: process.env.NODE_ENV === "production", // ✅ secure cookies over HTTPS
+            secure: process.env.NODE_ENV === "production",
             maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         },
     })
