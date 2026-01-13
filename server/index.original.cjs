@@ -20,12 +20,13 @@ console.log("✅ All modules loaded successfully");
 // require("dotenv").config();
 
 const app = express();
-// ❌ Force Port 3000 to match Railway Dashboard "Public Networking" setting
-// Railway configured this service to forward to port 3000 based on old Dockerfile
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
-// 🔍 LOGGING - ABSOLUTE TOP (Removed for production)
-// app.use((req, res, next) => { ... });
+// 🔍 LOGGING - ABSOLUTE TOP
+app.use((req, res, next) => {
+    console.log(`🔍 [${new Date().toISOString()}] ${req.method} ${req.path}`);
+    next();
+});
 
 // ✅ Railway/HTTPS proxy support (needed for secure cookies behind Railway)
 // ✅ Railway/HTTPS proxy support
@@ -160,7 +161,7 @@ try {
 }
 
 // ---------- Security / Middleware ----------
-app.use(helmet());
+// app.use(helmet()); // Temporarily disabled for debugging
 
 // ✅ CORS ONLY for API routes (don't apply to static assets)
 const ALLOWED_ORIGINS = [
@@ -430,7 +431,10 @@ if (process.env.NODE_ENV === "production") {
     if (fs.existsSync(distPath)) {
         console.log(`✅ Found dist folder, serving static files`);
 
-
+        // TEST ROUTE: Ensure we can serve root
+        app.get("/test-root", (req, res) => {
+            res.send("Hello from TouxDoux Server!");
+        });
 
         // Serve assets (JS/CSS) before any other static middleware
         app.use("/assets", express.static(path.join(distPath, "assets")));
@@ -464,35 +468,12 @@ app.use((err, req, res, next) => {
     res.status(status).json({ error: msg });
 });
 
-// Postgres Helper
-const { pool } = require("./pg.cjs");
-
-async function ensurePostgresSchema() {
-    if (!pool) {
-        console.log("ℹ️ Postgres not configured, skipping schema init");
-        return;
-    }
-
-    const schemaPath = path.join(__dirname, "sql", "schema.sql");
-    const sql = fs.readFileSync(schemaPath, "utf8");
-    await pool.query(sql);
-    console.log("✅ Postgres schema ensured");
-}
-
-ensurePostgresSchema()
-    .then(() => {
-        const server = app.listen(PORT, "0.0.0.0", () => {
-            console.log(`✅ Server running on port ${PORT}`);
-            console.log(`📁 Uploads: ${UPLOADS_DIR}`);
-            console.log(`💾 Database: ${DB_PATH}`);
-            console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
-        });
-
-        // ✅ Fix 502 Errors: Keep-Alive Timeout > Railway Load Balancer Timeout (60s)
-        server.keepAliveTimeout = 120 * 1000;
-        server.headersTimeout = 120 * 1000;
-    })
-    .catch((err) => {
-        console.error("❌ Failed to init Postgres schema:", err);
-        process.exit(1);
-    });
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`✅ Server running on port ${PORT}`);
+    console.log(`📁 Uploads: ${UPLOADS_DIR}`);
+    console.log(`💾 Database: ${DB_PATH}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+}).on("error", (err) => {
+    console.error("❌ Failed to start server:", err);
+    process.exit(1);
+});
