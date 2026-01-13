@@ -12,7 +12,6 @@ const fs = require("fs");
 const multer = require("multer");
 const session = require("express-session");
 const bcrypt = require("bcrypt");
-const Database = require("better-sqlite3");
 const { pool, pgQuery } = require("./pg.cjs"); // ✅ Single source of truth for Postgres
 const { makeObjectKey, putBuffer, presignGet } = require("./r2.cjs");
 
@@ -29,135 +28,8 @@ const PORT = process.env.PORT || 3000;
 // app.use((req, res, next) => { ... });
 
 // ✅ Railway/HTTPS proxy support (needed for secure cookies behind Railway)
-// ✅ Railway/HTTPS proxy support
 if (process.env.NODE_ENV === "production") {
     app.set("trust proxy", true); // Trust all hops (Railway)
-}
-
-// ---------- Platform-specific user data directory helper ----------
-function getUserDataDir() {
-    // On Railway or production, use a simple data directory
-    if (process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === "production") {
-        return path.join(__dirname, "data");
-    }
-
-    const os = require("os");
-    const platform = os.platform();
-    const homeDir = os.homedir();
-
-    if (platform === "darwin") {
-        // macOS
-        return path.join(homeDir, "Library", "Application Support", "touxdoux");
-    } else if (platform === "win32") {
-        // Windows
-        return path.join(process.env.APPDATA || homeDir, "touxdoux");
-    } else {
-        // Linux and others
-        return path.join(homeDir, ".local", "share", "touxdoux");
-    }
-}
-
-// ---------- Paths with environment variable support ----------
-// Priority: 1. Environment variable, 2. Existing database in server dir (migration), 3. User data directory
-const OLD_DB_PATH = path.resolve(__dirname, "touxdoux.db");
-const OLD_UPLOADS_DIR = path.resolve(__dirname, "uploads");
-
-const DEFAULT_UPLOADS_DIR = process.env.UPLOADS_DIR
-    ? path.resolve(process.env.UPLOADS_DIR)
-    : fs.existsSync(OLD_UPLOADS_DIR) && fs.readdirSync(OLD_UPLOADS_DIR).length > 0
-        ? OLD_UPLOADS_DIR // Use old location if it has files (migration)
-        : path.join(getUserDataDir(), "uploads");
-
-const DEFAULT_DB_PATH = process.env.DB_PATH
-    ? path.resolve(process.env.DB_PATH)
-    : fs.existsSync(OLD_DB_PATH)
-        ? OLD_DB_PATH // Use old location if it exists (migration)
-        : path.join(getUserDataDir(), "touxdoux.db");
-
-const UPLOADS_DIR = DEFAULT_UPLOADS_DIR;
-const DB_PATH = DEFAULT_DB_PATH;
-
-// Ensure directories exist
-try {
-    if (!fs.existsSync(UPLOADS_DIR)) {
-        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-        console.log(`✅ Created uploads directory: ${UPLOADS_DIR}`);
-    }
-    const dbDir = path.dirname(DB_PATH);
-    if (!fs.existsSync(dbDir)) {
-        fs.mkdirSync(dbDir, { recursive: true });
-        console.log(`✅ Created database directory: ${dbDir}`);
-    }
-    console.log(`📁 Uploads directory: ${UPLOADS_DIR}`);
-    console.log(`💾 Database path: ${DB_PATH}`);
-} catch (err) {
-    console.error("❌ Failed to create directories:", err);
-    process.exit(1);
-}
-
-// ---------- DB ----------
-let db;
-try {
-    db = new Database(DB_PATH);
-    db.pragma("journal_mode = WAL");
-} catch (err) {
-    console.error("Failed to initialize database:", err);
-    process.exit(1);
-}
-
-db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS files (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER,
-  stored_name TEXT NOT NULL,
-  original_name TEXT NOT NULL,
-  mime TEXT NOT NULL,
-  size INTEGER NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
-
-CREATE TABLE IF NOT EXISTS user_settings (
-  user_id INTEGER PRIMARY KEY,
-  download_location TEXT,
-  export_location TEXT,
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-`);
-
-// Migrate files table to allow NULL user_id (for anonymous uploads)
-try {
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS files_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id INTEGER,
-          stored_name TEXT NOT NULL,
-          original_name TEXT NOT NULL,
-          mime TEXT NOT NULL,
-          size INTEGER NOT NULL,
-          created_at TEXT NOT NULL DEFAULT (datetime('now')),
-          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        );
-        INSERT INTO files_new SELECT * FROM files;
-        DROP TABLE files;
-        ALTER TABLE files_new RENAME TO files;
-        CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
-    `);
-} catch (err) {
-    // Migration already done or table doesn't exist yet, ignore
-    if (!String(err.message).includes("no such table")) {
-        console.log("Migration note:", err.message);
-    }
 }
 
 // ---------- Security / Middleware ----------
@@ -532,8 +404,6 @@ async function ensurePostgresSchema() {
 // Start server immediately to satisfy health checks
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`✅ Server running on port ${PORT}`);
-    console.log(`📁 Uploads: ${UPLOADS_DIR}`);
-    console.log(`💾 Database: ${DB_PATH}`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
 
     // Init DB in background
