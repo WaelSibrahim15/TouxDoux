@@ -1,5 +1,13 @@
 // Log startup immediately
 console.log("🚀 Starting TouxDoux server...");
+process.on('uncaughtException', (err) => {
+    console.error('❌ UNCAUGHT EXCEPTION:', err);
+    // process.exit(1); // Don't exit immediately, let logger flush
+});
+process.on('unhandledRejection', (reason, p) => {
+    console.error('❌ UNHANDLED REJECTION:', reason);
+});
+
 console.log("📦 Node version:", process.version);
 console.log("📂 Working directory:", process.cwd());
 console.log("🌍 Environment:", process.env.NODE_ENV || "development");
