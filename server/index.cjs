@@ -82,7 +82,6 @@ app.use(
 app.use(express.json());
 
 // ✅ Sessions
-// ✅ Sessions
 const PgSession = require("connect-pg-simple")(session);
 // const { pool } = require("./pg.cjs"); // REMOVED (imported globally at top)
 
@@ -145,22 +144,6 @@ const upload = multer({
         cb(null, true);
     },
 });
-
-/*
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, UPLOADS_DIR),
-    filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        const safeExt = ext.replace(/[^a-z0-9.]/g, "");
-        const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-        cb(null, `${unique}${safeExt}`);
-    },
-});
-*/
-
-// ❌ IMPORTANT: DO NOT serve uploads statically for private uploads
-// app.use("/uploads", express.static(UPLOADS_DIR));
-
 
 // ---------- Auth routes ----------
 app.post("/api/auth/register", async (req, res, next) => {
