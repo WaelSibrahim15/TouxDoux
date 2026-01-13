@@ -12,6 +12,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.967.0",
+    "@aws-sdk/s3-request-presigner": "^3.967.0",
     "@vitejs/plugin-react": "^5.1.1",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.5.0",

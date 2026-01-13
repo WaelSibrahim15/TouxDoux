@@ -14,6 +14,7 @@ const session = require("express-session");
 const bcrypt = require("bcrypt");
 const Database = require("better-sqlite3");
 const { pool, pgQuery } = require("./pg.cjs"); // ✅ Single source of truth for Postgres
+const { makeObjectKey, putBuffer, presignGet } = require("./r2.cjs");
 
 console.log("✅ All modules loaded successfully");
 
@@ -256,6 +257,17 @@ const ALLOWED_MIME = new Set([
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ]);
 
+// Use MemoryStorage for R2 upload
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10MB
+    fileFilter: (req, file, cb) => {
+        if (!ALLOWED_MIME.has(file.mimetype)) return cb(new Error("Invalid file type"));
+        cb(null, true);
+    },
+});
+
+/*
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, UPLOADS_DIR),
     filename: (req, file, cb) => {
@@ -265,18 +277,11 @@ const storage = multer.diskStorage({
         cb(null, `${unique}${safeExt}`);
     },
 });
-
-const upload = multer({
-    storage,
-    limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10MB
-    fileFilter: (req, file, cb) => {
-        if (!ALLOWED_MIME.has(file.mimetype)) return cb(new Error("Invalid file type"));
-        cb(null, true);
-    },
-});
+*/
 
 // ❌ IMPORTANT: DO NOT serve uploads statically for private uploads
 // app.use("/uploads", express.static(UPLOADS_DIR));
+
 
 // ---------- Auth routes ----------
 app.post("/api/auth/register", async (req, res, next) => {
@@ -387,20 +392,27 @@ app.post("/api/upload", upload.single("file"), async (req, res, next) => {
     try {
         if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-        // Use session userId if authenticated, otherwise use NULL (anonymous)
         const userId = req.session?.userId || null;
+        const objectKey = makeObjectKey({ userId, originalName: req.file.originalname });
+
+        // Upload to R2
+        await putBuffer({
+            key: objectKey,
+            buffer: req.file.buffer,
+            contentType: req.file.mimetype,
+        });
 
         const r = await pgQuery(
-            `INSERT INTO files (user_id, stored_name, original_name, mime, size)
+            `INSERT INTO files (user_id, object_key, original_name, mime, size)
              VALUES ($1, $2, $3, $4, $5)
              RETURNING id, original_name, mime, size`,
-            [userId, req.file.filename, req.file.originalname, req.file.mimetype, req.file.size]
+            [userId, objectKey, req.file.originalname, req.file.mimetype, req.file.size]
         );
 
         // ✅ Return file id + originalName
         res.json({
             id: String(r.rows[0].id),
-            originalName: r.rows[0].original_name, // Note snake_case in DB
+            originalName: r.rows[0].original_name,
             mime: r.rows[0].mime,
             size: r.rows[0].size,
         });
@@ -431,24 +443,23 @@ app.get("/api/files/:id", async (req, res, next) => {
             }
         }
 
-        const fullPath = path.join(UPLOADS_DIR, file.stored_name || file.object_key); // support both for now
-        if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "File missing on disk" });
-
-        res.setHeader("Content-Type", file.mime);
-
-        // Check user's download preference if authenticated
+        // R2 Redirect Logic
+        // download preference (if you implemented it)
         let forceDownload = false;
         if (req.session?.userId) {
-            const settingsRes = await pgQuery(
-                `SELECT download_location FROM user_settings WHERE user_id = $1`,
-                [req.session.userId]
-            );
-            forceDownload = settingsRes.rows[0]?.download_location != null;
+            const s = await pgQuery(`SELECT download_location FROM user_settings WHERE user_id = $1`, [req.session.userId]);
+            forceDownload = s.rows[0]?.download_location != null;
         }
 
-        const disposition = forceDownload ? "attachment" : "inline";
-        res.setHeader("Content-Disposition", `${disposition}; filename="${file.original_name.replace(/"/g, "")}"`);
-        res.sendFile(fullPath);
+        const url = await presignGet({
+            key: file.object_key,          // or file.stored_name if you kept that column name in DB for legacy
+            filename: file.original_name,
+            contentType: file.mime,
+            expiresIn: 60,
+            forceDownload,
+        });
+
+        res.redirect(url);
     } catch (err) {
         next(err);
     }
