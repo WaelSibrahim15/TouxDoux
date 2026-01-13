@@ -848,14 +848,383 @@ export default function App() {
     }
   }
 
-  // ---------------- APP STATE ----------------
+  // ---------------- APP STATE (ALL HOOKS MUST BE ABOVE ANY RETURN) ----------------
   const [tasks, setTasks] = useState(() => loadTasks());
+
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem(THEME_KEY);
     return saved || "dark-mode";
   });
 
-  // Gate UI
+  const [themeModalOpen, setThemeModalOpen] = useState(false);
+
+  const [lastDeleted, setLastDeleted] = useState(null);
+
+  const [filter, setFilter] = useState("all"); // all|active|completed
+  const [sort, setSort] = useState("default"); // default|due|priority|created
+  const [search, setSearch] = useState("");
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState("add"); // add|edit
+  const [editingId, setEditingId] = useState(null);
+
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [printModalOpen, setPrintModalOpen] = useState(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  const todayISO = toISODate(new Date());
+
+  // Persist tasks locally (still localStorage for now)
+  useEffect(() => {
+    saveTasks(tasks);
+  }, [tasks]);
+
+  // Apply theme
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+
+  // Undo delete shortcut
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "z") {
+        e.preventDefault();
+        undoDelete();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastDeleted, tasks]);
+
+  function permanentlyDelete(taskId) {
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    setLastDeleted(task);
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+  }
+
+  function undoDelete() {
+    if (!lastDeleted) return;
+    setTasks((prev) => [lastDeleted, ...prev]);
+    setLastDeleted(null);
+  }
+
+  // Upload (cookie session supported)
+  async function handleUpload(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch(API.upload, {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || "Upload failed");
+    }
+
+    return res.json(); // { id, originalName, ... }
+  }
+
+  const weekStart = useMemo(() => {
+    const baseMonday = startOfWeekMonday(new Date());
+    return addDays(baseMonday, weekOffset * 7);
+  }, [weekOffset]);
+
+  const weekDays = useMemo(() => {
+    const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    return names.map((name, i) => {
+      const dateObj = addDays(weekStart, i);
+      const iso = toISODate(dateObj);
+      return {
+        name,
+        iso,
+        dateObj,
+        displayDate: formatDisplayDate(dateObj),
+        isWeekend: name === "Sat" || name === "Sun",
+        isToday: iso === todayISO,
+        isPast: iso < todayISO,
+        isFuture: iso > todayISO,
+      };
+    });
+  }, [weekStart, todayISO]);
+
+  const editingTask = useMemo(() => tasks.find((t) => t.id === editingId) || null, [tasks, editingId]);
+
+  function openAdd() {
+    setModalMode("add");
+    setEditingId(null);
+    setModalOpen(true);
+  }
+
+  function openEdit(taskId) {
+    setModalMode("edit");
+    setEditingId(taskId);
+    setModalOpen(true);
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    setEditingId(null);
+  }
+
+  function handleSaveFromModal(fields) {
+    if (modalMode === "add") {
+      const newTask = {
+        id: uid(),
+        title: fields.title,
+        notes: fields.notes,
+        priority: fields.priority,
+        status: fields.status,
+        createdAt: new Date().toISOString(),
+        dueDate: fields.dueDate || todayISO,
+        project: fields.project,
+        attachmentId: fields.attachmentId,
+        attachmentName: fields.attachmentName,
+      };
+      setTasks((prev) => [newTask, ...prev]);
+      setModalOpen(false);
+      return;
+    }
+
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === editingId
+          ? {
+            ...t,
+            title: fields.title,
+            notes: fields.notes,
+            priority: fields.priority,
+            status: fields.status,
+            dueDate: fields.dueDate,
+            project: fields.project,
+            attachmentId: fields.attachmentId,
+            attachmentName: fields.attachmentName,
+          }
+          : t
+      )
+    );
+    setModalOpen(false);
+  }
+
+  function handleDelete() {
+    if (!editingId) return;
+    const ok = confirm("Delete this task?");
+    if (!ok) return;
+    setTasks((prev) => prev.filter((t) => t.id !== editingId));
+    setModalOpen(false);
+  }
+
+  function handleBulkExport(taskTitles) {
+    const newTasks = taskTitles.map((title, index) => ({
+      id: uid(),
+      title,
+      notes: "",
+      priority: index + 1,
+      status: "incomplete",
+      createdAt: new Date().toISOString(),
+      dueDate: todayISO,
+      project: "",
+      attachmentId: null,
+      attachmentName: null,
+    }));
+    setTasks((prev) => [...newTasks, ...prev]);
+    setBulkModalOpen(false);
+  }
+
+  function toggleComplete(taskId) {
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== taskId) return t;
+        if (t.status === "complete") {
+          return { ...t, status: "incomplete", priority: t.previousPriority || t.priority || 1 };
+        } else {
+          return { ...t, status: "complete", previousPriority: t.priority };
+        }
+      })
+    );
+  }
+
+  function moveTaskUp(taskId, dayISO) {
+    setTasks((prev) => {
+      const dayTasks = prev.filter((t) => t.dueDate === dayISO && t.status === "incomplete");
+      dayTasks.sort((a, b) => (a.priority || 1) - (b.priority || 1));
+      const idx = dayTasks.findIndex((t) => t.id === taskId);
+      if (idx <= 0) return prev;
+
+      const newPriorities = new Map();
+      dayTasks.forEach((t, i) => {
+        if (i === idx - 1) newPriorities.set(t.id, idx + 1);
+        else if (i === idx) newPriorities.set(t.id, idx);
+        else newPriorities.set(t.id, i + 1);
+      });
+
+      return prev.map((t) => (newPriorities.has(t.id) ? { ...t, priority: newPriorities.get(t.id) } : t));
+    });
+  }
+
+  function moveTaskDown(taskId, dayISO) {
+    setTasks((prev) => {
+      const dayTasks = prev.filter((t) => t.dueDate === dayISO && t.status === "incomplete");
+      dayTasks.sort((a, b) => (a.priority || 1) - (b.priority || 1));
+      const idx = dayTasks.findIndex((t) => t.id === taskId);
+      if (idx < 0 || idx >= dayTasks.length - 1) return prev;
+
+      const newPriorities = new Map();
+      dayTasks.forEach((t, i) => {
+        if (i === idx) newPriorities.set(t.id, idx + 2);
+        else if (i === idx + 1) newPriorities.set(t.id, idx + 1);
+        else newPriorities.set(t.id, i + 1);
+      });
+
+      return prev.map((t) => (newPriorities.has(t.id) ? { ...t, priority: newPriorities.get(t.id) } : t));
+    });
+  }
+
+  const filteredTasks = useMemo(() => {
+    let out = [...tasks];
+    if (filter === "active") out = out.filter((t) => t.status === "incomplete");
+    if (filter === "completed") out = out.filter((t) => t.status === "complete");
+
+    const q = search.trim().toLowerCase();
+    if (q) {
+      out = out.filter((t) => {
+        const hay = `${t.title} ${t.notes || ""} ${t.project || ""}`.toLowerCase();
+        return hay.includes(q);
+      });
+    }
+    return out;
+  }, [tasks, filter, search]);
+
+  const sortedTasks = useMemo(() => {
+    const out = [...filteredTasks];
+
+    function defaultRank(t) {
+      const overdue = isOverdue(t, todayISO) ? 0 : 1;
+      const hasDue = t.dueDate ? 0 : 1;
+      const dueVal = t.dueDate ? t.dueDate : "9999-12-31";
+      const completed = t.status === "complete" ? 1 : 0;
+      return [completed, overdue, hasDue, dueVal, -(t.priority || 1), t.createdAt || ""];
+    }
+
+    function cmp(a, b) {
+      const ra = defaultRank(a);
+      const rb = defaultRank(b);
+      for (let i = 0; i < ra.length; i++) {
+        if (ra[i] < rb[i]) return -1;
+        if (ra[i] > rb[i]) return 1;
+      }
+      return 0;
+    }
+
+    if (sort === "default") {
+      out.sort(cmp);
+      return out;
+    }
+
+    if (sort === "due") {
+      out.sort((a, b) => {
+        if (a.status !== b.status) return a.status === "complete" ? 1 : -1;
+        const ao = isOverdue(a, todayISO);
+        const bo = isOverdue(b, todayISO);
+        if (ao !== bo) return ao ? -1 : 1;
+        const ad = a.dueDate || "9999-12-31";
+        const bd = b.dueDate || "9999-12-31";
+        if (ad < bd) return -1;
+        if (ad > bd) return 1;
+        return (b.priority || 1) - (a.priority || 1);
+      });
+      return out;
+    }
+
+    if (sort === "priority") {
+      out.sort((a, b) => {
+        if (a.status !== b.status) return a.status === "complete" ? 1 : -1;
+
+        const ap = a.priority || 1;
+        const bp = b.priority || 1;
+        if (bp !== ap) return bp - ap;
+
+        const ao = isOverdue(a, todayISO);
+        const bo = isOverdue(b, todayISO);
+        if (ao !== bo) return ao ? -1 : 1;
+
+        const ad = a.dueDate || "9999-12-31";
+        const bd = b.dueDate || "9999-12-31";
+        if (ad < bd) return -1;
+        if (ad > bd) return 1;
+        return (a.createdAt || "") > (b.createdAt || "") ? -1 : 1;
+      });
+      return out;
+    }
+
+    if (sort === "created") {
+      out.sort((a, b) => {
+        if (a.status !== b.status) return a.status === "complete" ? 1 : -1;
+        return (b.createdAt || "").localeCompare(a.createdAt || "");
+      });
+      return out;
+    }
+
+    out.sort(cmp);
+    return out;
+  }, [filteredTasks, sort, todayISO]);
+
+  const tasksByDayISO = useMemo(() => {
+    const map = new Map();
+    for (const day of weekDays) map.set(day.iso, { active: [], completed: [] });
+    const weekStartISO = weekDays[0].iso;
+    const weekEndISO = weekDays[6].iso;
+
+    for (const t of sortedTasks) {
+      if (t.dueDate && t.dueDate >= weekStartISO && t.dueDate <= weekEndISO) {
+        if (map.has(t.dueDate)) {
+          const bucket = map.get(t.dueDate);
+          if (t.status === "complete") bucket.completed.push(t);
+          else bucket.active.push(t);
+        }
+      }
+    }
+
+    for (const [, bucket] of map) {
+      bucket.active.sort((a, b) => (a.priority || 1) - (b.priority || 1));
+    }
+
+    return map;
+  }, [sortedTasks, weekDays]);
+
+  const [dragOverDay, setDragOverDay] = useState("");
+  const [zoomedColumn, setZoomedColumn] = useState(null);
+
+  function onDragStart(e, taskId) {
+    e.dataTransfer.setData("text/plain", taskId);
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  function onDrop(e, dayISO) {
+    e.preventDefault();
+    const taskId = e.dataTransfer.getData("text/plain");
+    if (!taskId) return;
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, dueDate: dayISO } : t)));
+    setDragOverDay("");
+  }
+
+  function onDragOver(e, dayISO) {
+    e.preventDefault();
+    setDragOverDay(dayISO);
+  }
+
+  function onDragLeave(e, dayISO) {
+    if (dragOverDay === dayISO) setDragOverDay("");
+  }
+
+  // ---------------- GATED RENDERING (ONLY AFTER ALL HOOKS) ----------------
   if (!authChecked) {
     return (
       <div className="authContainer">
@@ -868,613 +1237,308 @@ export default function App() {
     return <AuthScreen onAuth={setUser} />;
   }
 
-  if (user === null) {
-    return <AuthScreen onAuth={setUser} />;
-  }
+  // ---------------- UI ----------------
+  return (
+    <div className="container">
+      <div className="topbar">
+        <div className="controls">
+          <div className="pill">
+            <label>Filter</label>
+            <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+              <option value="all">All</option>
+              <option value="active">Active</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
 
+          <div className="pill">
+            <label>Sort</label>
+            <select value={sort} onChange={(e) => setSort(e.target.value)}>
+              <option value="default">Default</option>
+              <option value="due">Due date</option>
+              <option value="priority">Priority</option>
+              <option value="created">Created</option>
+            </select>
+          </div>
 
-  return saved || "dark-mode";
-});
-const [themeModalOpen, setThemeModalOpen] = useState(false);
+          <div className="pill">
+            <label>Search</label>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="optional v1"
+              style={{ width: 160 }}
+            />
+          </div>
 
-useEffect(() => {
-  saveTasks(tasks);
-}, [tasks]);
+          <button className="primaryBtn" onClick={openAdd}>
+            + Add Task
+          </button>
+          <button className="goldBtn" onClick={() => setBulkModalOpen(true)}>
+            + Add Tasks
+          </button>
+          <button className="softRedBtn" onClick={() => setPrintModalOpen(true)}>
+            {"{print tasks}"}
+          </button>
+          <button className="secondaryBtn" onClick={() => setSettingsModalOpen(true)} title="Settings">
+            ⚙️ Settings
+          </button>
+          <button className="themeBtn" onClick={() => setThemeModalOpen(true)} title="Change Theme">
+            <span>Theme</span>
+            <span className="themeIcon">☀️</span>
+          </button>
 
-// Apply theme on mount and when it changes
-useEffect(() => {
-  document.documentElement.setAttribute("data-theme", theme);
-  localStorage.setItem(THEME_KEY, theme);
-}, [theme]);
-
-const [lastDeleted, setLastDeleted] = useState(null);
-
-useEffect(() => {
-  function handleKeyDown(e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "z") {
-      e.preventDefault();
-      undoDelete();
-    }
-  }
-  window.addEventListener("keydown", handleKeyDown);
-  return () => window.removeEventListener("keydown", handleKeyDown);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [lastDeleted, tasks]);
-
-function permanentlyDelete(taskId) {
-  const task = tasks.find((t) => t.id === taskId);
-  if (!task) return;
-  setLastDeleted(task);
-  setTasks((prev) => prev.filter((t) => t.id !== taskId));
-}
-
-function undoDelete() {
-  if (!lastDeleted) return;
-  setTasks((prev) => [lastDeleted, ...prev]);
-  setLastDeleted(null);
-}
-
-// ✅ Upload uses proxy URL + cookie session support
-async function handleUpload(file) {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const res = await fetch(API.upload, {
-    method: "POST",
-    body: formData,
-    credentials: "include",
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || "Upload failed");
-  }
-
-  // Expect server to return: { id, originalName, ... }
-  return res.json();
-}
-
-const [filter, setFilter] = useState("all"); // all|active|completed
-const [sort, setSort] = useState("default"); // default|due|priority|created
-const [search, setSearch] = useState("");
-const [modalOpen, setModalOpen] = useState(false);
-const [modalMode, setModalMode] = useState("add"); // add|edit
-const [editingId, setEditingId] = useState(null);
-const [bulkModalOpen, setBulkModalOpen] = useState(false);
-const [printModalOpen, setPrintModalOpen] = useState(false);
-const [settingsModalOpen, setSettingsModalOpen] = useState(false);
-const [weekOffset, setWeekOffset] = useState(0);
-
-const todayISO = toISODate(new Date());
-const weekStart = useMemo(() => {
-  const baseMonday = startOfWeekMonday(new Date());
-  return addDays(baseMonday, weekOffset * 7);
-}, [weekOffset]);
-
-const weekDays = useMemo(() => {
-  const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  return names.map((name, i) => {
-    const dateObj = addDays(weekStart, i);
-    const iso = toISODate(dateObj);
-    return {
-      name,
-      iso,
-      dateObj,
-      displayDate: formatDisplayDate(dateObj),
-      isWeekend: name === "Sat" || name === "Sun",
-      isToday: iso === todayISO,
-      isPast: iso < todayISO,
-      isFuture: iso > todayISO,
-    };
-  });
-}, [weekStart, todayISO]);
-
-const editingTask = useMemo(() => tasks.find((t) => t.id === editingId) || null, [tasks, editingId]);
-
-function openAdd() {
-  setModalMode("add");
-  setEditingId(null);
-  setModalOpen(true);
-}
-
-function openEdit(taskId) {
-  setModalMode("edit");
-  setEditingId(taskId);
-  setModalOpen(true);
-}
-
-function closeModal() {
-  setModalOpen(false);
-  setEditingId(null);
-}
-
-function handleSaveFromModal(fields) {
-  if (modalMode === "add") {
-    const newTask = {
-      id: uid(),
-      title: fields.title,
-      notes: fields.notes,
-      priority: fields.priority,
-      status: fields.status,
-      createdAt: new Date().toISOString(),
-      dueDate: fields.dueDate || todayISO,
-      project: fields.project,
-      attachmentId: fields.attachmentId,
-      attachmentName: fields.attachmentName,
-    };
-    setTasks((prev) => [newTask, ...prev]);
-    setModalOpen(false);
-    return;
-  }
-
-  setTasks((prev) =>
-    prev.map((t) =>
-      t.id === editingId
-        ? {
-          ...t,
-          title: fields.title,
-          notes: fields.notes,
-          priority: fields.priority,
-          status: fields.status,
-          dueDate: fields.dueDate,
-          project: fields.project,
-          attachmentId: fields.attachmentId,
-          attachmentName: fields.attachmentName,
-        }
-        : t
-    )
-  );
-  setModalOpen(false);
-}
-
-function handleDelete() {
-  if (!editingId) return;
-  const ok = confirm("Delete this task?");
-  if (!ok) return;
-  setTasks((prev) => prev.filter((t) => t.id !== editingId));
-  setModalOpen(false);
-}
-
-function handleBulkExport(taskTitles) {
-  const newTasks = taskTitles.map((title, index) => ({
-    id: uid(),
-    title,
-    notes: "",
-    priority: index + 1,
-    status: "incomplete",
-    createdAt: new Date().toISOString(),
-    dueDate: todayISO,
-    project: "",
-    attachmentId: null,
-    attachmentName: null,
-  }));
-  setTasks((prev) => [...newTasks, ...prev]);
-  setBulkModalOpen(false);
-}
-
-function toggleComplete(taskId) {
-  setTasks((prev) =>
-    prev.map((t) => {
-      if (t.id !== taskId) return t;
-      if (t.status === "complete") {
-        return { ...t, status: "incomplete", priority: t.previousPriority || t.priority || 1 };
-      } else {
-        return { ...t, status: "complete", previousPriority: t.priority };
-      }
-    })
-  );
-}
-
-function moveTaskUp(taskId, dayISO) {
-  setTasks((prev) => {
-    const dayTasks = prev.filter((t) => t.dueDate === dayISO && t.status === "incomplete");
-    dayTasks.sort((a, b) => (a.priority || 1) - (b.priority || 1));
-    const idx = dayTasks.findIndex((t) => t.id === taskId);
-    if (idx <= 0) return prev;
-
-    const newPriorities = new Map();
-    dayTasks.forEach((t, i) => {
-      if (i === idx - 1) newPriorities.set(t.id, idx + 1);
-      else if (i === idx) newPriorities.set(t.id, idx);
-      else newPriorities.set(t.id, i + 1);
-    });
-
-    return prev.map((t) => (newPriorities.has(t.id) ? { ...t, priority: newPriorities.get(t.id) } : t));
-  });
-}
-
-function moveTaskDown(taskId, dayISO) {
-  setTasks((prev) => {
-    const dayTasks = prev.filter((t) => t.dueDate === dayISO && t.status === "incomplete");
-    dayTasks.sort((a, b) => (a.priority || 1) - (b.priority || 1));
-    const idx = dayTasks.findIndex((t) => t.id === taskId);
-    if (idx < 0 || idx >= dayTasks.length - 1) return prev;
-
-    const newPriorities = new Map();
-    dayTasks.forEach((t, i) => {
-      if (i === idx) newPriorities.set(t.id, idx + 2);
-      else if (i === idx + 1) newPriorities.set(t.id, idx + 1);
-      else newPriorities.set(t.id, i + 1);
-    });
-
-    return prev.map((t) => (newPriorities.has(t.id) ? { ...t, priority: newPriorities.get(t.id) } : t));
-  });
-}
-
-const filteredTasks = useMemo(() => {
-  let out = [...tasks];
-  if (filter === "active") out = out.filter((t) => t.status === "incomplete");
-  if (filter === "completed") out = out.filter((t) => t.status === "complete");
-
-  const q = search.trim().toLowerCase();
-  if (q) {
-    out = out.filter((t) => {
-      const hay = `${t.title} ${t.notes || ""} ${t.project || ""}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }
-  return out;
-}, [tasks, filter, search]);
-
-const sortedTasks = useMemo(() => {
-  const out = [...filteredTasks];
-
-  function defaultRank(t) {
-    const overdue = isOverdue(t, todayISO) ? 0 : 1;
-    const hasDue = t.dueDate ? 0 : 1;
-    const dueVal = t.dueDate ? t.dueDate : "9999-12-31";
-    const completed = t.status === "complete" ? 1 : 0;
-    return [completed, overdue, hasDue, dueVal, -(t.priority || 1), t.createdAt || ""];
-  }
-
-  function cmp(a, b) {
-    const ra = defaultRank(a);
-    const rb = defaultRank(b);
-    for (let i = 0; i < ra.length; i++) {
-      if (ra[i] < rb[i]) return -1;
-      if (ra[i] > rb[i]) return 1;
-    }
-    return 0;
-  }
-
-  if (sort === "default") {
-    out.sort(cmp);
-    return out;
-  }
-
-  if (sort === "due") {
-    out.sort((a, b) => {
-      if (a.status !== b.status) return a.status === "complete" ? 1 : -1;
-      const ao = isOverdue(a, todayISO);
-      const bo = isOverdue(b, todayISO);
-      if (ao !== bo) return ao ? -1 : 1;
-      const ad = a.dueDate || "9999-12-31";
-      const bd = b.dueDate || "9999-12-31";
-      if (ad < bd) return -1;
-      if (ad > bd) return 1;
-      return (b.priority || 1) - (a.priority || 1);
-    });
-    return out;
-  }
-
-  if (sort === "priority") {
-    out.sort((a, b) => {
-      if (a.status !== b.status) return a.status === "complete" ? 1 : -1;
-      const ap = a.priority || 1;
-      const bp = b.priority || 1;
-      if (bp !== ap) return bp - ap;
-
-      const ao = isOverdue(a, todayISO);
-      const bo = isOverdue(b, todayISO);
-      if (ao !== bo) return ao ? -1 : 1;
-
-      const ad = a.dueDate || "9999-12-31";
-      const bd = b.dueDate || "9999-12-31";
-      if (ad < bd) return -1;
-      if (ad > bd) return 1;
-      return (a.createdAt || "") > (b.createdAt || "") ? -1 : 1;
-    });
-    return out;
-  }
-
-  if (sort === "created") {
-    out.sort((a, b) => {
-      if (a.status !== b.status) return a.status === "complete" ? 1 : -1;
-      return (b.createdAt || "").localeCompare(a.createdAt || "");
-    });
-    return out;
-  }
-
-  out.sort(cmp);
-  return out;
-}, [filteredTasks, sort, todayISO]);
-
-const tasksByDayISO = useMemo(() => {
-  const map = new Map();
-  for (const day of weekDays) map.set(day.iso, { active: [], completed: [] });
-  const weekStartISO = weekDays[0].iso;
-  const weekEndISO = weekDays[6].iso;
-
-  for (const t of sortedTasks) {
-    if (t.dueDate && t.dueDate >= weekStartISO && t.dueDate <= weekEndISO) {
-      if (map.has(t.dueDate)) {
-        const bucket = map.get(t.dueDate);
-        if (t.status === "complete") bucket.completed.push(t);
-        else bucket.active.push(t);
-      }
-    }
-  }
-
-  for (const [, bucket] of map) {
-    bucket.active.sort((a, b) => (a.priority || 1) - (b.priority || 1));
-  }
-
-  return map;
-}, [sortedTasks, weekDays]);
-
-const [dragOverDay, setDragOverDay] = useState("");
-const [zoomedColumn, setZoomedColumn] = useState(null);
-
-function onDragStart(e, taskId) {
-  e.dataTransfer.setData("text/plain", taskId);
-  e.dataTransfer.effectAllowed = "move";
-}
-
-function onDrop(e, dayISO) {
-  e.preventDefault();
-  const taskId = e.dataTransfer.getData("text/plain");
-  if (!taskId) return;
-
-  setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, dueDate: dayISO } : t)));
-  setDragOverDay("");
-}
-
-function onDragOver(e, dayISO) {
-  e.preventDefault();
-  setDragOverDay(dayISO);
-}
-
-function onDragLeave(e, dayISO) {
-  if (dragOverDay === dayISO) setDragOverDay("");
-}
-
-return (
-  <div className="container">
-    <div className="topbar">
-      <div className="controls">
-        <div className="pill">
-          <label>Filter</label>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-            <option value="all">All</option>
-            <option value="active">Active</option>
-            <option value="completed">Completed</option>
-          </select>
+          <button className="secondaryBtn" onClick={logout} title="Logout">
+            Logout
+          </button>
         </div>
 
-        <div className="pill">
-          <label>Sort</label>
-          <select value={sort} onChange={(e) => setSort(e.target.value)}>
-            <option value="default">Default</option>
-            <option value="due">Due date</option>
-            <option value="priority">Priority</option>
-            <option value="created">Created</option>
-          </select>
-        </div>
-
-        <div className="pill">
-          <label>Search</label>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="optional v1" style={{ width: 160 }} />
-        </div>
-
-        <button className="primaryBtn" onClick={openAdd}>
-          + Add Task
-        </button>
-        <button className="goldBtn" onClick={() => setBulkModalOpen(true)}>
-          + Add Tasks
-        </button>
-        <button className="softRedBtn" onClick={() => setPrintModalOpen(true)}>
-          {"{print tasks}"}
-        </button>
-        <button className="secondaryBtn" onClick={() => setSettingsModalOpen(true)} title="Settings">
-          ⚙️ Settings
-        </button>
-        <button className="themeBtn" onClick={() => setThemeModalOpen(true)} title="Change Theme">
-          <span>Theme</span>
-          <span className="themeIcon">☀️</span>
-        </button>
-
-        <button className="secondaryBtn" onClick={logout} title="Logout">
-          Logout
-        </button>
-      </div>
-
-      <div className="branding">
-        <h1 className="appTitle">TOUXDOUX</h1>
-        <div className="copyright">
-          <span className="copyright-line">Private and Confidential</span>
-          <span className="copyright-line">Signed in as: {user?.email}</span>
-          <span className="copyright-line">Wael Ibrahim © 2026</span>
-          <span className="version">v1.23</span>
+        <div className="branding">
+          <h1 className="appTitle">TOUXDOUX</h1>
+          <div className="copyright">
+            <span className="copyright-line">Private and Confidential</span>
+            <span className="copyright-line">Signed in as: {user?.email}</span>
+            <span className="copyright-line">Wael Ibrahim © 2026</span>
+            <span className="version">v1.23</span>
+          </div>
         </div>
       </div>
-    </div>
 
-    <div className="weekNav">
-      <button onClick={() => setWeekOffset((prev) => prev - 1)}>← Previous</button>
-      <span className="weekLabel">
-        {weekDays[0].displayDate} — {weekDays[6].displayDate}
-      </span>
-      <button onClick={() => setWeekOffset((prev) => prev + 1)}>Next →</button>
-      {weekOffset !== 0 && <button onClick={() => setWeekOffset(0)}>Today</button>}
-    </div>
-
-    <div className="board">
-      <div
-        className={"navColumn prevWeek" + (dragOverDay === "prev" ? " dragOver" : "")}
-        onClick={() => setWeekOffset((prev) => prev - 1)}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOverDay("prev");
-        }}
-        onDragLeave={() => setDragOverDay("")}
-        onDrop={(e) => {
-          e.preventDefault();
-          const taskId = e.dataTransfer.getData("text/plain");
-          setDragOverDay("");
-          const prevWeekMonday = addDays(weekStart, -7);
-          const prevWeekMondayISO = toISODate(prevWeekMonday);
-          if (taskId) setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, dueDate: prevWeekMondayISO } : t)));
-          setWeekOffset((prev) => prev - 1);
-        }}
-      >
-        <span className="navColumnText">Previous Week</span>
+      <div className="weekNav">
+        <button onClick={() => setWeekOffset((prev) => prev - 1)}>← Previous</button>
+        <span className="weekLabel">
+          {weekDays[0].displayDate} — {weekDays[6].displayDate}
+        </span>
+        <button onClick={() => setWeekOffset((prev) => prev + 1)}>Next →</button>
+        {weekOffset !== 0 && <button onClick={() => setWeekOffset(0)}>Today</button>}
       </div>
 
-      {weekDays.map((day) => {
-        const bucket = tasksByDayISO.get(day.iso) || { active: [], completed: [] };
-        const { active: activeTasks, completed: completedTasks } = bucket;
-        const columnClasses = [
-          "column",
-          day.isWeekend ? "weekend" : "",
-          day.isToday ? "today" : "",
-          day.isPast ? "past" : "",
-          day.isFuture && !day.isToday ? "future" : "",
-          zoomedColumn === day.iso ? "zoomed" : "",
-        ]
-          .filter(Boolean)
-          .join(" ");
+      <div className="board">
+        <div
+          className={"navColumn prevWeek" + (dragOverDay === "prev" ? " dragOver" : "")}
+          onClick={() => setWeekOffset((prev) => prev - 1)}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOverDay("prev");
+          }}
+          onDragLeave={() => setDragOverDay("")}
+          onDrop={(e) => {
+            e.preventDefault();
+            const taskId = e.dataTransfer.getData("text/plain");
+            setDragOverDay("");
+            const prevWeekMonday = addDays(weekStart, -7);
+            const prevWeekMondayISO = toISODate(prevWeekMonday);
+            if (taskId) setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, dueDate: prevWeekMondayISO } : t)));
+            setWeekOffset((prev) => prev - 1);
+          }}
+        >
+          <span className="navColumnText">Previous Week</span>
+        </div>
 
-        const handleColumnDoubleClick = (e) => {
-          if (e.target.closest(".card") || e.target.closest(".completedTask")) return;
-          setZoomedColumn((prev) => (prev === day.iso ? null : day.iso));
-        };
+        {weekDays.map((day) => {
+          const bucket = tasksByDayISO.get(day.iso) || { active: [], completed: [] };
+          const { active: activeTasks, completed: completedTasks } = bucket;
 
-        return (
-          <div className={columnClasses} key={day.iso} onDoubleClick={handleColumnDoubleClick}>
-            <div className="colHeader">
-              <div className="dayName">{day.name}</div>
-              <div className="dayDate">{day.displayDate}</div>
-              {zoomedColumn !== day.iso && <div className="zoomHint">Double-click to expand</div>}
-            </div>
+          const columnClasses = [
+            "column",
+            day.isWeekend ? "weekend" : "",
+            day.isToday ? "today" : "",
+            day.isPast ? "past" : "",
+            day.isFuture && !day.isToday ? "future" : "",
+            zoomedColumn === day.iso ? "zoomed" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
 
-            <div className={"dropZone" + (dragOverDay === day.iso ? " dragOver" : "")} onDrop={(e) => onDrop(e, day.iso)} onDragOver={(e) => onDragOver(e, day.iso)} onDragLeave={(e) => onDragLeave(e, day.iso)}>
-              {activeTasks.map((t, idx) => {
-                const overdue = isOverdue(t, todayISO);
-                const cardClasses = ["card", t.project === "Personal" ? "personal" : ""].filter(Boolean).join(" ");
-                return (
-                  <div className={cardClasses} key={t.id} draggable onDragStart={(e) => onDragStart(e, t.id)} onDoubleClick={() => openEdit(t.id)} title="Double-click to edit. Drag to move.">
-                    <div className="cardTop">
-                      <input className="checkbox" type="checkbox" checked={false} onChange={() => toggleComplete(t.id)} onClick={(e) => e.stopPropagation()} />
+          const handleColumnDoubleClick = (e) => {
+            if (e.target.closest(".card") || e.target.closest(".completedTask")) return;
+            setZoomedColumn((prev) => (prev === day.iso ? null : day.iso));
+          };
 
-                      <div style={{ width: "100%" }}>
-                        <div className="cardTitleRow">
-                          <div className="priorityBadge">{idx + 1}</div>
-                          <p className="cardTitle">{t.title}</p>
+          return (
+            <div className={columnClasses} key={day.iso} onDoubleClick={handleColumnDoubleClick}>
+              <div className="colHeader">
+                <div className="dayName">{day.name}</div>
+                <div className="dayDate">{day.displayDate}</div>
+                {zoomedColumn !== day.iso && <div className="zoomHint">Double-click to expand</div>}
+              </div>
 
-                          <div className="cardActions">
-                            <button className="iconBtn moveBtn" onClick={(e) => { e.stopPropagation(); moveTaskUp(t.id, day.iso); }} aria-label="Move up" disabled={idx === 0}>
-                              ▲
-                            </button>
-                            <button className="iconBtn moveBtn" onClick={(e) => { e.stopPropagation(); moveTaskDown(t.id, day.iso); }} aria-label="Move down" disabled={idx === activeTasks.length - 1}>
-                              ▼
-                            </button>
-                            <button className="iconBtn" onClick={(e) => { e.stopPropagation(); openEdit(t.id); }} aria-label="Edit">
-                              ✎
-                            </button>
+              <div
+                className={"dropZone" + (dragOverDay === day.iso ? " dragOver" : "")}
+                onDrop={(e) => onDrop(e, day.iso)}
+                onDragOver={(e) => onDragOver(e, day.iso)}
+                onDragLeave={(e) => onDragLeave(e, day.iso)}
+              >
+                {activeTasks.map((t, idx) => {
+                  const overdue = isOverdue(t, todayISO);
+                  const cardClasses = ["card", t.project === "Personal" ? "personal" : ""].filter(Boolean).join(" ");
+
+                  return (
+                    <div
+                      className={cardClasses}
+                      key={t.id}
+                      draggable
+                      onDragStart={(e) => onDragStart(e, t.id)}
+                      onDoubleClick={() => openEdit(t.id)}
+                      title="Double-click to edit. Drag to move."
+                    >
+                      <div className="cardTop">
+                        <input
+                          className="checkbox"
+                          type="checkbox"
+                          checked={false}
+                          onChange={() => toggleComplete(t.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+
+                        <div style={{ width: "100%" }}>
+                          <div className="cardTitleRow">
+                            <div className="priorityBadge">{idx + 1}</div>
+                            <p className="cardTitle">{t.title}</p>
+
+                            <div className="cardActions">
+                              <button
+                                className="iconBtn moveBtn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  moveTaskUp(t.id, day.iso);
+                                }}
+                                aria-label="Move up"
+                                disabled={idx === 0}
+                              >
+                                ▲
+                              </button>
+                              <button
+                                className="iconBtn moveBtn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  moveTaskDown(t.id, day.iso);
+                                }}
+                                aria-label="Move down"
+                                disabled={idx === activeTasks.length - 1}
+                              >
+                                ▼
+                              </button>
+                              <button
+                                className="iconBtn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEdit(t.id);
+                                }}
+                                aria-label="Edit"
+                              >
+                                ✎
+                              </button>
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="meta">
-                          {t.project ? <span className="chip">{t.project}</span> : null}
-                          {overdue ? <span className="chip overdue">Overdue</span> : null}
-                        </div>
-
-                        {/* ✅ Private attachment link */}
-                        {t.attachmentId && (
-                          <div className="attachment" onClick={(e) => e.stopPropagation()}>
-                            <a href={API.file(t.attachmentId)} target="_blank" rel="noopener noreferrer" className="attachmentLink">
-                              📎 {t.attachmentName || "Attachment"}
-                            </a>
+                          <div className="meta">
+                            {t.project ? <span className="chip">{t.project}</span> : null}
+                            {overdue ? <span className="chip overdue">Overdue</span> : null}
                           </div>
-                        )}
+
+                          {t.attachmentId && (
+                            <div className="attachment" onClick={(e) => e.stopPropagation()}>
+                              <a
+                                href={API.file(t.attachmentId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="attachmentLink"
+                              >
+                                📎 {t.attachmentName || "Attachment"}
+                              </a>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
+                  );
+                })}
+
+                {activeTasks.length === 0 && completedTasks.length === 0 ? (
+                  <div style={{ color: "rgba(170,179,194,0.7)", fontSize: 12, padding: 6 }}>Drop tasks here</div>
+                ) : null}
+
+                {completedTasks.length > 0 && (
+                  <div className="completedSection">
+                    <div className="completedHeader">Done ({completedTasks.length})</div>
+                    {completedTasks.map((t) => (
+                      <div className="completedTask" key={t.id} style={{ position: "relative", paddingRight: "45px" }}>
+                        <input
+                          className="checkbox small"
+                          type="checkbox"
+                          checked={true}
+                          onChange={() => toggleComplete(t.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          title="Click to restore task"
+                        />
+                        <span className="completedTitle">{t.title}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            permanentlyDelete(t.id);
+                          }}
+                          className="permanentDeleteBtn"
+                          title="Permanently Delete"
+                        />
+                      </div>
+                    ))}
                   </div>
-                );
-              })}
-
-              {activeTasks.length === 0 && completedTasks.length === 0 ? (
-                <div style={{ color: "rgba(170,179,194,0.7)", fontSize: 12, padding: 6 }}>Drop tasks here</div>
-              ) : null}
-
-              {completedTasks.length > 0 && (
-                <div className="completedSection">
-                  <div className="completedHeader">Done ({completedTasks.length})</div>
-                  {completedTasks.map((t) => (
-                    <div className="completedTask" key={t.id} style={{ position: "relative", paddingRight: "45px" }}>
-                      <input className="checkbox small" type="checkbox" checked={true} onChange={() => toggleComplete(t.id)} onClick={(e) => e.stopPropagation()} title="Click to restore task" />
-                      <span className="completedTitle">{t.title}</span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          permanentlyDelete(t.id);
-                        }}
-                        className="permanentDeleteBtn"
-                        title="Permanently Delete"
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
 
-      <div
-        className={"navColumn nextWeek" + (dragOverDay === "next" ? " dragOver" : "")}
-        onClick={() => setWeekOffset((prev) => prev + 1)}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOverDay("next");
-        }}
-        onDragLeave={() => setDragOverDay("")}
-        onDrop={(e) => {
-          e.preventDefault();
-          const taskId = e.dataTransfer.getData("text/plain");
-          setDragOverDay("");
-          const nextWeekMonday = addDays(weekStart, 7);
-          const nextWeekMondayISO = toISODate(nextWeekMonday);
-          if (taskId) setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, dueDate: nextWeekMondayISO } : t)));
-          setWeekOffset((prev) => prev + 1);
-        }}
-      >
-        <span className="navColumnText">Next Week</span>
+        <div
+          className={"navColumn nextWeek" + (dragOverDay === "next" ? " dragOver" : "")}
+          onClick={() => setWeekOffset((prev) => prev + 1)}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOverDay("next");
+          }}
+          onDragLeave={() => setDragOverDay("")}
+          onDrop={(e) => {
+            e.preventDefault();
+            const taskId = e.dataTransfer.getData("text/plain");
+            setDragOverDay("");
+            const nextWeekMonday = addDays(weekStart, 7);
+            const nextWeekMondayISO = toISODate(nextWeekMonday);
+            if (taskId) setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, dueDate: nextWeekMondayISO } : t)));
+            setWeekOffset((prev) => prev + 1);
+          }}
+        >
+          <span className="navColumnText">Next Week</span>
+        </div>
       </div>
+
+      <TaskModal
+        open={modalOpen}
+        mode={modalMode}
+        initialTask={modalMode === "edit" ? editingTask : null}
+        onCancel={closeModal}
+        onSave={handleSaveFromModal}
+        onDelete={handleDelete}
+        onUploadFile={handleUpload}
+      />
+
+      <BulkTaskModal open={bulkModalOpen} onCancel={() => setBulkModalOpen(false)} onExport={handleBulkExport} />
+
+      <PrintTasksModal
+        open={printModalOpen}
+        onCancel={() => setPrintModalOpen(false)}
+        tasks={tasks}
+        formatDate={formatDisplayDate}
+      />
+
+      <SettingsModal open={settingsModalOpen} onCancel={() => setSettingsModalOpen(false)} />
+
+      <ThemeSelector
+        open={themeModalOpen}
+        onClose={() => setThemeModalOpen(false)}
+        currentTheme={theme}
+        onThemeChange={setTheme}
+      />
     </div>
-
-    <TaskModal
-      open={modalOpen}
-      mode={modalMode}
-      initialTask={modalMode === "edit" ? editingTask : null}
-      onCancel={closeModal}
-      onSave={handleSaveFromModal}
-      onDelete={handleDelete}
-      onUploadFile={handleUpload}
-    />
-
-    <BulkTaskModal open={bulkModalOpen} onCancel={() => setBulkModalOpen(false)} onExport={handleBulkExport} />
-
-    <PrintTasksModal open={printModalOpen} onCancel={() => setPrintModalOpen(false)} tasks={tasks} formatDate={formatDisplayDate} />
-
-    <SettingsModal open={settingsModalOpen} onCancel={() => setSettingsModalOpen(false)} />
-
-    <ThemeSelector
-      open={themeModalOpen}
-      onClose={() => setThemeModalOpen(false)}
-      currentTheme={theme}
-      onThemeChange={setTheme}
-    />
-  </div>
-);
+  );
 }
