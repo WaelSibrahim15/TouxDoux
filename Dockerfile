@@ -11,6 +11,4 @@ RUN npm prune --production
 
 ENV NODE_ENV=production
 
-
-
 CMD ["node", "server/index.cjs"]
