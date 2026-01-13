@@ -611,6 +611,7 @@ function PrintTasksModal({ open, onCancel, tasks, formatDate }) {
     </div>
   );
 }
+
 function ThemeSelector({ open, onClose, currentTheme, onThemeChange }) {
   const themes = [
     { id: "cinnamon", name: "Cinnamon", color: "#f5e6d3" },
@@ -666,7 +667,6 @@ function SettingsModal({ open, onCancel }) {
     apiJSON("/api/settings")
       .then((data) => {
         setDownloadLocation(data.downloadLocation || "");
-        // setExportLocation(data.exportLocation || ""); // Unused
       })
       .catch((err) => {
         setError(err.message || "Failed to load settings");
@@ -684,7 +684,6 @@ function SettingsModal({ open, onCancel }) {
         method: "PUT",
         body: JSON.stringify({
           downloadLocation: downloadLocation.trim() || null,
-          // exportLocation: exportLocation.trim() || null,
         }),
       });
       onCancel();
@@ -728,8 +727,6 @@ function SettingsModal({ open, onCancel }) {
                   <option value="download">Always Download</option>
                 </select>
               </div>
-
-              {/* Export location removed as it was unused/confusing in web context */}
 
               <div className="field" style={{ marginTop: "20px", padding: "12px", background: "#f5f5f5", borderRadius: "4px" }}>
                 <strong style={{ fontSize: "13px" }}>Account Storage</strong>
@@ -830,7 +827,39 @@ function AuthScreen({ onAuth }) {
     </div>
   );
 }
+
 export default function App() {
+  // ---------------- AUTH ----------------
+  const [user, setUser] = useState(undefined); // undefined=loading, null=not logged in, object=logged in
+
+  useEffect(() => {
+    apiJSON("/api/auth/me")
+      .then((data) => setUser(data.user))
+      .catch(() => setUser(null));
+  }, []);
+
+  async function logout() {
+    try {
+      await apiJSON("/api/auth/logout", { method: "POST" });
+    } finally {
+      setUser(null);
+    }
+  }
+
+  // Gate UI
+  if (user === undefined) {
+    return (
+      <div className="authContainer">
+        <div className="authBox">Loading…</div>
+      </div>
+    );
+  }
+
+  if (user === null) {
+    return <AuthScreen onAuth={setUser} />;
+  }
+
+  // ---------------- APP ----------------
   const [tasks, setTasks] = useState(() => loadTasks());
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem(THEME_KEY);
@@ -960,7 +989,6 @@ export default function App() {
         createdAt: new Date().toISOString(),
         dueDate: fields.dueDate || todayISO,
         project: fields.project,
-        // ✅
         attachmentId: fields.attachmentId,
         attachmentName: fields.attachmentName,
       };
@@ -980,7 +1008,6 @@ export default function App() {
             status: fields.status,
             dueDate: fields.dueDate,
             project: fields.project,
-            // ✅
             attachmentId: fields.attachmentId,
             attachmentName: fields.attachmentName,
           }
@@ -1123,10 +1150,6 @@ export default function App() {
     if (sort === "priority") {
       out.sort((a, b) => {
         if (a.status !== b.status) return a.status === "complete" ? 1 : -1;
-
-        // NOTE: your app treats lower number as higher priority in columns.
-        // This comparator uses higher-number-first. Keep as-is for now to avoid behavior change.
-        // If you want consistent meaning, tell me and I’ll unify it everywhere.
         const ap = a.priority || 1;
         const bp = b.priority || 1;
         if (bp !== ap) return bp - ap;
@@ -1249,12 +1272,17 @@ export default function App() {
             <span>Theme</span>
             <span className="themeIcon">☀️</span>
           </button>
+
+          <button className="secondaryBtn" onClick={logout} title="Logout">
+            Logout
+          </button>
         </div>
 
         <div className="branding">
           <h1 className="appTitle">TOUXDOUX</h1>
           <div className="copyright">
             <span className="copyright-line">Private and Confidential</span>
+            <span className="copyright-line">Signed in as: {user?.email}</span>
             <span className="copyright-line">Wael Ibrahim © 2026</span>
             <span className="version">v1.23</span>
           </div>
