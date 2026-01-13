@@ -288,14 +288,17 @@ app.post("/api/auth/register", async (req, res, next) => {
 
         const hash = await bcrypt.hash(password, 12);
 
-        const stmt = db.prepare("INSERT INTO users (email, password_hash) VALUES (?, ?)");
-        const info = stmt.run(email, hash);
+        const r = await pgQuery(
+            `INSERT INTO users (email, password_hash)
+       VALUES ($1, $2)
+       RETURNING id, email`,
+            [email, hash]
+        );
 
-        req.session.userId = info.lastInsertRowid;
-        res.status(201).json({ user: { id: info.lastInsertRowid, email } });
+        req.session.userId = r.rows[0].id;
+        res.status(201).json({ user: { id: r.rows[0].id, email: r.rows[0].email } });
     } catch (err) {
-        // Handle unique email
-        if (String(err?.message || "").includes("UNIQUE")) {
+        if (String(err?.message || "").toLowerCase().includes("duplicate") || String(err?.message || "").includes("unique")) {
             return res.status(409).json({ error: "Email already registered" });
         }
         next(err);
@@ -309,7 +312,12 @@ app.post("/api/auth/login", async (req, res, next) => {
 
         if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
 
-        const user = db.prepare("SELECT id, email, password_hash FROM users WHERE email = ?").get(email);
+        const r = await pgQuery(
+            `SELECT id, email, password_hash FROM users WHERE email = $1`,
+            [email]
+        );
+
+        const user = r.rows[0];
         if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
         const ok = await bcrypt.compare(password, user.password_hash);
@@ -326,10 +334,19 @@ app.post("/api/auth/logout", (req, res) => {
     req.session?.destroy(() => res.json({ ok: true }));
 });
 
-app.get("/api/auth/me", (req, res) => {
-    if (!req.session?.userId) return res.json({ user: null });
-    const user = db.prepare("SELECT id, email FROM users WHERE id = ?").get(req.session.userId);
-    res.json({ user: user || null });
+app.get("/api/auth/me", async (req, res, next) => {
+    try {
+        if (!req.session?.userId) return res.json({ user: null });
+
+        const r = await pgQuery(
+            `SELECT id, email FROM users WHERE id = $1`,
+            [req.session.userId]
+        );
+
+        res.json({ user: r.rows[0] || null });
+    } catch (err) {
+        next(err);
+    }
 });
 
 // ---------- Settings routes ----------
@@ -480,7 +497,7 @@ app.use((err, req, res, next) => {
 });
 
 // Postgres Helper
-const { pool } = require("./pg.cjs");
+const { pool, pgQuery } = require("./pg.cjs");
 
 async function ensurePostgresSchema() {
     if (!pool) {
