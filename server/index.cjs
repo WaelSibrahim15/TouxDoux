@@ -529,20 +529,19 @@ async function ensurePostgresSchema() {
     console.log("✅ Postgres schema ensured");
 }
 
-ensurePostgresSchema()
-    .then(() => {
-        const server = app.listen(PORT, "0.0.0.0", () => {
-            console.log(`✅ Server running on port ${PORT}`);
-            console.log(`📁 Uploads: ${UPLOADS_DIR}`);
-            console.log(`💾 Database: ${DB_PATH}`);
-            console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
-        });
+// Start server immediately to satisfy health checks
+const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`✅ Server running on port ${PORT}`);
+    console.log(`📁 Uploads: ${UPLOADS_DIR}`);
+    console.log(`💾 Database: ${DB_PATH}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
 
-        // ✅ Fix 502 Errors: Keep-Alive Timeout > Railway Load Balancer Timeout (60s)
-        server.keepAliveTimeout = 120 * 1000;
-        server.headersTimeout = 120 * 1000;
-    })
-    .catch((err) => {
-        console.error("❌ Failed to init Postgres schema:", err);
-        process.exit(1);
-    });
+    // Init DB in background
+    ensurePostgresSchema()
+        .then(() => console.log("✅ Postgres schema initialized"))
+        .catch((err) => console.error("❌ Postgres schema init failed:", err));
+});
+
+// ✅ Fix 502 Errors: Keep-Alive Timeout > Railway Load Balancer Timeout (60s)
+server.keepAliveTimeout = 120 * 1000;
+server.headersTimeout = 120 * 1000;
