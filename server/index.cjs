@@ -382,69 +382,76 @@ app.put("/api/settings", requireAuth, (req, res) => {
 
 // ---------- Upload (private + owned) ----------
 // Allow uploads with or without authentication
-app.post("/api/upload", upload.single("file"), (req, res) => {
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+// Allow uploads with or without authentication
+app.post("/api/upload", upload.single("file"), async (req, res, next) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-    // Use session userId if authenticated, otherwise use NULL (anonymous)
-    const userId = req.session?.userId || null;
+        // Use session userId if authenticated, otherwise use NULL (anonymous)
+        const userId = req.session?.userId || null;
 
-    const insert = db.prepare(`
-    INSERT INTO files (user_id, stored_name, original_name, mime, size)
-    VALUES (?, ?, ?, ?, ?)
-  `);
+        const r = await pgQuery(
+            `INSERT INTO files (user_id, stored_name, original_name, mime, size)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, original_name, mime, size`,
+            [userId, req.file.filename, req.file.originalname, req.file.mimetype, req.file.size]
+        );
 
-    const info = insert.run(
-        userId,
-        req.file.filename,
-        req.file.originalname,
-        req.file.mimetype,
-        req.file.size
-    );
-
-    // ✅ Return file id + originalName (matches your updated App.jsx expectations)
-    res.json({
-        id: String(info.lastInsertRowid),
-        originalName: req.file.originalname,
-        mime: req.file.mimetype,
-        size: req.file.size,
-    });
+        // ✅ Return file id + originalName
+        res.json({
+            id: String(r.rows[0].id),
+            originalName: r.rows[0].original_name, // Note snake_case in DB
+            mime: r.rows[0].mime,
+            size: r.rows[0].size,
+        });
+    } catch (err) {
+        next(err);
+    }
 });
 
 // ---------- Download (private + ownership enforced) ----------
-app.get("/api/files/:id", (req, res) => {
-    const id = req.params.id;
+app.get("/api/files/:id", async (req, res, next) => {
+    try {
+        const id = req.params.id;
 
-    const file = db.prepare("SELECT * FROM files WHERE id = ?").get(id);
-    if (!file) return res.status(404).json({ error: "Not found" });
+        const r = await pgQuery(`SELECT * FROM files WHERE id = $1`, [id]);
+        const file = r.rows[0];
 
-    // If authenticated, check ownership. If not authenticated, allow access to anonymous files (user_id = NULL)
-    if (req.session?.userId) {
-        if (file.user_id !== req.session.userId && file.user_id !== null) {
-            return res.status(403).json({ error: "Forbidden" });
+        if (!file) return res.status(404).json({ error: "Not found" });
+
+        // If authenticated, check ownership. If not authenticated, only allow anonymous files
+        if (req.session?.userId) {
+            // Postgres BIGINT comes as string, double equals handles string/number mismatch
+            if (file.user_id != req.session.userId && file.user_id !== null) {
+                return res.status(403).json({ error: "Forbidden" });
+            }
+        } else {
+            if (file.user_id !== null) {
+                return res.status(403).json({ error: "Forbidden" });
+            }
         }
-    } else {
-        // Not authenticated - only allow access to anonymous files
-        if (file.user_id !== null) {
-            return res.status(403).json({ error: "Forbidden" });
+
+        const fullPath = path.join(UPLOADS_DIR, file.stored_name || file.object_key); // support both for now
+        if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "File missing on disk" });
+
+        res.setHeader("Content-Type", file.mime);
+
+        // Check user's download preference if authenticated
+        let forceDownload = false;
+        if (req.session?.userId) {
+            const settingsRes = await pgQuery(
+                `SELECT download_location FROM user_settings WHERE user_id = $1`,
+                [req.session.userId]
+            );
+            forceDownload = settingsRes.rows[0]?.download_location != null;
         }
+
+        const disposition = forceDownload ? "attachment" : "inline";
+        res.setHeader("Content-Disposition", `${disposition}; filename="${file.original_name.replace(/"/g, "")}"`);
+        res.sendFile(fullPath);
+    } catch (err) {
+        next(err);
     }
-
-    const fullPath = path.join(UPLOADS_DIR, file.stored_name);
-    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "File missing on disk" });
-
-    res.setHeader("Content-Type", file.mime);
-
-    // Check user's download preference if authenticated
-    let forceDownload = false;
-    if (req.session?.userId) {
-        const settings = db.prepare("SELECT download_location FROM user_settings WHERE user_id = ?").get(req.session.userId);
-        forceDownload = settings?.download_location !== null;
-    }
-
-    // inline opens in browser when possible; attachment forces download
-    const disposition = forceDownload ? "attachment" : "inline";
-    res.setHeader("Content-Disposition", `${disposition}; filename="${file.original_name.replace(/"/g, "")}"`);
-    res.sendFile(fullPath);
 });
 
 // Log all requests for debugging (BEFORE all routes)
