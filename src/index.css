@@ -2,88 +2,76 @@
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
   line-height: 1.4;
 
-  /* Default theme (Dark Mode) */
-  --bg: #000000;
-  --panel: #0a0a0a;
-  --panel2: #0f1320;
-  --text: #e9ecf1;
-  --muted: #aab3c2;
-  --border: #24304a;
-  --accent: #7aa2ff;
+  /* Default theme (Cinnamon) */
+  --bg: #FFF5ED;
+  --panel: #FFECD9;
+  --card: #FFFFFF;
+  --border: #FC9C44;
+  --text: #2D1810;
+  --muted: #8B5A3C;
+  --accent: #FC9C44;
   --danger: #ff6b6b;
   --ok: #5ee4a1;
-  --chip: #1a2140;
+  --chip: #5a3d3d;
 }
 
 /* Theme: Cinnamon */
 [data-theme="cinnamon"] {
-  --bg: #2d1b1b;
-  --panel: #3d2525;
-  --panel2: #4a2e2e;
-  --text: #f5e6d3;
-  --muted: #c9a882;
-  --border: #6b4e4e;
-  --accent: #d4a574;
-  --danger: #e67e7e;
-  --ok: #8fb88f;
-  --chip: #5a3d3d;
+  --bg: #FFF5ED;
+  --panel: #FFECD9;
+  --card: #FFFFFF;
+  --border: #FC9C44;
+  --text: #2D1810;
+  --muted: #8B5A3C;
+  --accent: #FC9C44;
 }
 
 /* Theme: Neutral Gray */
-[data-theme="neutral-gray"] {
-  --bg: #1a1a1a;
-  --panel: #2a2a2a;
-  --panel2: #333333;
-  --text: #e0e0e0;
-  --muted: #999999;
-  --border: #444444;
-  --accent: #7aa2ff;
-  --danger: #ff6b6b;
-  --ok: #5ee4a1;
-  --chip: #3a3a3a;
+[data-theme="neutralGray"] {
+  --bg: #F0F2F5;
+  --panel: #E8EAED;
+  --card: #FFFFFF;
+  --border: #D1D5DB;
+  --text: #1F2937;
+  --muted: #6B7280;
+  --accent: #2563EB;
 }
 
-/* Theme: Dark Mode (default) */
-[data-theme="dark-mode"] {
-  --bg: #000000;
-  --panel: #0a0a0a;
-  --panel2: #0f1320;
-  --text: #e9ecf1;
-  --muted: #aab3c2;
-  --border: #24304a;
+/* Theme: Dark Mode */
+[data-theme="darkMode"] {
+  --bg: #121212;
+  --panel: #1E1E1E;
+  --card: #2D2D2D;
+  --border: #404040;
+  --text: #F5F5F5;
+  --muted: #A0A0A0;
   --accent: #7aa2ff;
-  --danger: #ff6b6b;
-  --ok: #5ee4a1;
-  --chip: #1a2140;
 }
 
 /* Theme: Blue Gray */
-[data-theme="blue-gray"] {
-  --bg: #1a1f2e;
-  --panel: #252b3d;
-  --panel2: #2d3447;
-  --text: #e1e8f0;
-  --muted: #8fa3b8;
-  --border: #3d4a5f;
-  --accent: #5b9bd5;
-  --danger: #e67e7e;
-  --ok: #7bc47f;
-  --chip: #2d3a4f;
+[data-theme="blueGray"] {
+  --bg: #F7F9FC;
+  --panel: #EDF1F7;
+  --card: #FFFFFF;
+  --border: #D4DCE8;
+  --text: #1E293B;
+  --muted: #64748B;
+  --accent: #64748B;
 }
 
 /* Theme: Rose Quartz */
-[data-theme="rose-quartz"] {
-  --bg: #2a1f24;
-  --panel: #3a2a32;
-  --panel2: #453640;
-  --text: #f5e6ea;
-  --muted: #c9a8b5;
-  --border: #6b5a66;
-  --accent: #e8a4b8;
-  --danger: #e67e7e;
-  --ok: #a8c5a8;
-  --chip: #4a3a42;
+[data-theme="roseQuartz"] {
+  --bg: #FFF5F5;
+  --panel: #FFE5E5;
+  --card: #FFFFFF;
+  --border: #FC8F8F;
+  --text: #2D1010;
+  --muted: #8B3C3C;
+  --accent: #FC8F8F;
 }
+
+
+
 
 * {
   box-sizing: border-box;
@@ -137,12 +125,41 @@ select {
   opacity: 0.95;
 }
 
+@keyframes yellowGlow {
+  0% {
+    box-shadow: 0 0 5px 0 rgba(255, 230, 0, 0.2);
+    border-color: rgba(255, 230, 0, 0.3);
+  }
+
+  50% {
+    box-shadow: 0 0 15px 2px rgba(255, 230, 0, 0.5);
+    border-color: rgba(255, 230, 0, 0.7);
+  }
+
+  100% {
+    box-shadow: 0 0 5px 0 rgba(255, 230, 0, 0.2);
+    border-color: rgba(255, 230, 0, 0.3);
+  }
+}
+
 .branding {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  padding: 4px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+
+  /* Glassmorphism */
+  background: rgba(255, 255, 255, 0.1);
+  /* Slight white tint for glass */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  /* box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); // replaced by animation */
+
+  /* Permanent Glow Animation */
+  animation: yellowGlow 3s ease-in-out infinite;
 }
 
 .copyright {
@@ -201,7 +218,7 @@ select {
 }
 
 .weekNav button {
-  background: rgba(26, 33, 64, 0.7);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 14px;
@@ -611,8 +628,8 @@ select {
   justify-content: center;
   min-width: 50px;
   max-width: 50px;
-  background: rgba(26, 33, 64, 0.4);
-  border: 2px dashed rgba(122, 162, 255, 0.3);
+  background: var(--panel);
+  border: 2px dashed var(--border);
   border-radius: 16px;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -648,7 +665,7 @@ select {
 }
 
 .prevWeek {
-  border-color: rgba(255, 200, 100, 0.3);
+  border-color: var(--border);
 }
 
 .prevWeek:hover {
@@ -672,7 +689,7 @@ select {
 }
 
 .column {
-  background: rgba(18, 22, 36, 0.85);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
@@ -696,19 +713,18 @@ select {
 }
 
 .column.weekend {
-  background: rgba(30, 38, 58, 0.92);
-  border-color: rgba(122, 162, 255, 0.18);
+  /* background: var(--panel); already inherited */
+  border-color: var(--border);
 }
 
 .column.today {
-  border: 2px solid #d4a017;
-  box-shadow: 0 0 12px rgba(212, 160, 23, 0.3), inset 0 0 20px rgba(212, 160, 23, 0.05);
-  background: rgba(28, 34, 52, 0.95);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 12px var(--accent), inset 0 0 20px var(--accent);
 }
 
 .column.past {
-  background: rgba(12, 15, 24, 0.92);
-  border-color: rgba(36, 48, 74, 0.5);
+  background: var(--panel);
+  border-color: var(--border);
   opacity: 0.75;
 }
 
@@ -717,14 +733,14 @@ select {
 }
 
 .column.future {
-  background: rgba(24, 30, 48, 0.9);
-  border-color: rgba(122, 162, 255, 0.12);
+  background: var(--panel);
+  border-color: var(--border);
 }
 
 .colHeader {
   padding: 10px 10px 8px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(15, 19, 32, 0.9);
+  background: var(--panel);
 }
 
 .colHeader .dayName {
@@ -770,13 +786,13 @@ select {
 }
 
 .dropZone.dragOver {
-  outline: 2px dashed rgba(122, 162, 255, 0.65);
+  outline: 2px dashed var(--accent);
   outline-offset: -6px;
-  background: rgba(122, 162, 255, 0.06);
+  background: var(--bg);
 }
 
 .card {
-  background: rgba(26, 33, 64, 0.55);
+  background: var(--card);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 14px;
   padding: 10px;
@@ -784,8 +800,7 @@ select {
 }
 
 .card.personal {
-  background: rgba(70, 130, 180, 0.35);
-  border-color: rgba(100, 149, 237, 0.5);
+  border: 1px solid var(--accent);
 }
 
 .card:active {

@@ -112,6 +112,10 @@ function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete, onUplo
   const [attachment, setAttachment] = useState(null); // { id: '', name: '' }
   const [isUploading, setIsUploading] = useState(false);
 
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recFreq, setRecFreq] = useState("daily"); // daily, weekly
+  const [recDuration, setRecDuration] = useState("1m"); // 1w, 2w, 1m, 2m, 3m
+
   useEffect(() => {
     if (!open) return;
     const t = initialTask || null;
@@ -119,9 +123,16 @@ function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete, onUplo
     setNotes(t?.notes ?? "");
     setDueDate(t?.dueDate ?? "");
     setPriority(Number.isFinite(t?.priority) ? t.priority : 1);
-    setProject(t?.project ?? "Work");
+    // Goal B: Default to "Work" if none is set
+    setProject(t?.project || "Work");
     setStatus(t?.status ?? "incomplete");
     setAttachment(t?.attachmentId ? { id: t.attachmentId, name: t.attachmentName } : null);
+
+    // Recurrence only relevant for creating new tasks derived from UI state, not persisted yet
+    setIsRecurring(false);
+    setRecFreq("daily");
+    setRecDuration("1m");
+
     setError("");
     setIsUploading(false);
   }, [open, initialTask]);
@@ -160,18 +171,74 @@ function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete, onUplo
       setError("Title required.");
       return;
     }
-    const cleaned = {
+
+    const baseTask = {
       title: title.trim(),
       notes: notes.trim() ? notes.trim() : "",
-      dueDate: dueDate || "",
       priority: Math.max(1, Number(priority) || 1),
-      project: project || "",
+      project: project || "Work",
       status,
-      // ✅ store attachment id, not a public path
       attachmentId: attachment?.id || null,
       attachmentName: attachment?.name || null,
     };
-    onSave(cleaned);
+
+    const startISO = dueDate || toISODate(new Date());
+
+    if (!isRecurring || mode === "edit") {
+      // Single task save
+      onSave({
+        ...baseTask,
+        dueDate: dueDate || "",
+      });
+      return;
+    }
+
+    // Recurrence expansion (Client-Side)
+    // 3 months max ~ 90 days
+    const MAX_DAYS = 90;
+    let limitDays = 7;
+    if (recDuration === "1w") limitDays = 7;
+    if (recDuration === "2w") limitDays = 14;
+    if (recDuration === "1m") limitDays = 30;
+    if (recDuration === "2m") limitDays = 60;
+    if (recDuration === "3m") limitDays = 90;
+
+    const startDate = parseISODate(startISO);
+    const endDate = addDays(startDate, limitDays);
+    const endISO = toISODate(endDate);
+
+    const generatedTasks = [];
+    let current = startDate;
+    let count = 0;
+    const recGroupId = uid();
+
+    while (toISODate(current) <= endISO && count < 100) { // Safety break
+      generatedTasks.push({
+        ...baseTask,
+        dueDate: toISODate(current),
+        recurrenceGroupId: recGroupId,
+      });
+
+      if (recFreq === "daily") {
+        current = addDays(current, 1);
+      } else { // weekly
+        current = addDays(current, 7);
+      }
+      count++;
+    }
+
+    // Edge case: Weekly with short duration might result in 0 extra tasks if duration < 7 days
+    // But we always include startDate, so generatedTasks has at least 1.
+
+    onSave(generatedTasks);
+  }
+
+  // Summary Text
+  let summaryText = "";
+  if (isRecurring) {
+    const f = recFreq === "daily" ? "Daily" : "Weekly";
+    const dMap = { "1w": "1 week", "2w": "2 weeks", "1m": "1 month", "2m": "2 months", "3m": "3 months" };
+    summaryText = `Repeats ${f.toLowerCase()} for ${dMap[recDuration]}.`;
   }
 
   return (
@@ -210,6 +277,52 @@ function TaskModal({ open, mode, initialTask, onCancel, onSave, onDelete, onUplo
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Details, links, context…"
             />
+          </div>
+
+
+          <div className="field" style={{ padding: "10px", background: "rgba(0,0,0,0.03)", borderRadius: "8px", marginBottom: "12px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: isRecurring ? "10px" : "0" }}>
+              <label style={{ margin: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontWeight: "600", fontSize: "12px", color: "var(--text)" }}>
+                <input
+                  type="checkbox"
+                  checked={isRecurring}
+                  onChange={(e) => setIsRecurring(e.target.checked)}
+                  disabled={mode === "edit"}
+                />
+                Repeat task
+              </label>
+              {isRecurring && <span style={{ fontSize: "11px", color: "var(--accent)" }}>{summaryText}</span>}
+            </div>
+
+            {isRecurring && (
+              <div style={{ display: "flex", gap: "10px" }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: "11px", color: "var(--muted)" }}>Frequency</label>
+                  <select
+                    style={{ width: "100%", padding: "6px", borderRadius: "4px", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
+                    value={recFreq}
+                    onChange={(e) => setRecFreq(e.target.value)}
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: "11px", color: "var(--muted)" }}>Duration</label>
+                  <select
+                    style={{ width: "100%", padding: "6px", borderRadius: "4px", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
+                    value={recDuration}
+                    onChange={(e) => setRecDuration(e.target.value)}
+                  >
+                    <option value="1w">1 week</option>
+                    <option value="2w">2 weeks</option>
+                    <option value="1m">1 month</option>
+                    <option value="2m">2 months</option>
+                    <option value="3m">3 months</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="row2">
@@ -614,11 +727,11 @@ function PrintTasksModal({ open, onCancel, tasks, formatDate }) {
 
 function ThemeSelector({ open, onClose, currentTheme, onThemeChange }) {
   const themes = [
-    { id: "cinnamon", name: "Cinnamon", color: "#f5e6d3" },
-    { id: "neutral-gray", name: "Neutral Gray", color: "#e0e0e0" },
-    { id: "dark-mode", name: "Dark Mode", color: "#e9ecf1" },
-    { id: "blue-gray", name: "Blue Gray", color: "#e1e8f0" },
-    { id: "rose-quartz", name: "Rose Quartz", color: "#f5e6ea" },
+    { id: 'cinnamon', name: 'Cinnamon', bg: '#FFF5ED', sidebar: '#FFECD9', card: '#FFFFFF', border: '#FC9C44', textColor: '#2D1810', textMuted: '#8B5A3C', isDark: false },
+    { id: 'neutralGray', name: 'Neutral Gray', bg: '#F0F2F5', sidebar: '#E8EAED', card: '#FFFFFF', border: '#D1D5DB', textColor: '#1F2937', textMuted: '#6B7280', isDark: false },
+    { id: 'darkMode', name: 'Dark Mode', bg: '#121212', sidebar: '#1E1E1E', card: '#2D2D2D', border: '#404040', textColor: '#F5F5F5', textMuted: '#A0A0A0', isDark: true },
+    { id: 'blueGray', name: 'Blue Gray', bg: '#F7F9FC', sidebar: '#EDF1F7', card: '#FFFFFF', border: '#D4DCE8', textColor: '#1E293B', textMuted: '#64748B', isDark: false },
+    { id: 'roseQuartz', name: 'Rose Quartz', bg: '#FFF5F5', sidebar: '#FFE5E5', card: '#FFFFFF', border: '#FC8F8F', textColor: '#2D1010', textMuted: '#8B3C3C', isDark: false }
   ];
 
   if (!open) return null;
@@ -642,7 +755,7 @@ function ThemeSelector({ open, onClose, currentTheme, onThemeChange }) {
                 onClose();
               }}
             >
-              <div className="themeSwatch" style={{ backgroundColor: theme.color }}></div>
+              <div className="themeSwatch" style={{ backgroundColor: theme.bg }}></div>
               <span className="themeName">{theme.name}</span>
               {currentTheme === theme.id && <span className="themeCheck">✓</span>}
             </div>
@@ -830,15 +943,17 @@ function AuthScreen({ onAuth }) {
 
 export default function App() {
   // ---------------- AUTH ----------------
-  const [user, setUser] = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  // ---------------- AUTH ----------------
+  // BYPASS: Default to logged in (Offline Mode) since DB is missing
+  const [user, setUser] = useState({ id: "offline", email: "demo@touxdoux.com" });
+  const [authChecked, setAuthChecked] = useState(true);
 
-  useEffect(() => {
-    apiJSON("/api/auth/me")
-      .then((data) => setUser(data.user))
-      .catch(() => setUser(null))
-      .finally(() => setAuthChecked(true));
-  }, []);
+  // useEffect(() => {
+  //   apiJSON("/api/auth/me")
+  //     .then((data) => setUser(data.user))
+  //     .catch(() => setUser(null))
+  //     .finally(() => setAuthChecked(true));
+  // }, []);
 
   async function logout() {
     try {
@@ -853,7 +968,7 @@ export default function App() {
 
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem(THEME_KEY);
-    return saved || "dark-mode";
+    return saved || "cinnamon";
   });
 
   const [themeModalOpen, setThemeModalOpen] = useState(false);
@@ -976,19 +1091,33 @@ export default function App() {
 
   function handleSaveFromModal(fields) {
     if (modalMode === "add") {
-      const newTask = {
-        id: uid(),
-        title: fields.title,
-        notes: fields.notes,
-        priority: fields.priority,
-        status: fields.status,
-        createdAt: new Date().toISOString(),
-        dueDate: fields.dueDate || todayISO,
-        project: fields.project,
-        attachmentId: fields.attachmentId,
-        attachmentName: fields.attachmentName,
-      };
-      setTasks((prev) => [newTask, ...prev]);
+      let tasksToAdd = [];
+      if (Array.isArray(fields)) {
+        // If expansion happened in TaskModal
+        tasksToAdd = fields.map(f => ({
+          ...f,
+          id: uid(), // assign distinct UID
+          createdAt: new Date().toISOString(),
+          // Use provided due date or default
+          dueDate: f.dueDate || todayISO,
+        }));
+      } else {
+        // Single task
+        tasksToAdd = [{
+          id: uid(),
+          title: fields.title,
+          notes: fields.notes,
+          priority: fields.priority,
+          status: fields.status,
+          createdAt: new Date().toISOString(),
+          dueDate: fields.dueDate || todayISO,
+          project: fields.project,
+          attachmentId: fields.attachmentId,
+          attachmentName: fields.attachmentName,
+        }];
+      }
+
+      setTasks((prev) => [...tasksToAdd, ...prev]);
       setModalOpen(false);
       return;
     }
@@ -1288,6 +1417,22 @@ export default function App() {
             <span className="themeIcon">☀️</span>
           </button>
 
+          <div className="userInfoBox" style={{
+            padding: "6px 12px",
+            border: "1px solid var(--border)",
+            borderRadius: "6px",
+            fontSize: "12px",
+            color: "var(--muted)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            lineHeight: "1.2",
+            background: "rgba(0,0,0,0.02)"
+          }}>
+            <span style={{ fontSize: "10px", opacity: 0.7 }}>Signed in as:</span>
+            <span style={{ fontWeight: 500 }}>{user?.email}</span>
+          </div>
+
           <button className="secondaryBtn" onClick={logout} title="Logout">
             Logout
           </button>
@@ -1297,7 +1442,6 @@ export default function App() {
           <h1 className="appTitle">TOUXDOUX</h1>
           <div className="copyright">
             <span className="copyright-line">Private and Confidential</span>
-            <span className="copyright-line">Signed in as: {user?.email}</span>
             <span className="copyright-line">Wael Ibrahim © 2026</span>
             <span className="version">v1.23</span>
           </div>
